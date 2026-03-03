@@ -497,11 +497,13 @@ function BrowseView({
   setViewMode,
   availablePapers,
   loadingQuestions,
+  onSelectSubject,
   startPaperAttempt,
 }: {
   setViewMode: SetViewMode;
   availablePapers: { year: string; subject: string; grade: string; school: string; count: number }[];
   loadingQuestions: boolean;
+  onSelectSubject: (subjectValue: string) => Promise<void>;
   startPaperAttempt: (paper: { year: string; subject: string; grade: string; school: string; count: number }) => void;
 }) {
   const [selectedSubject, setSelectedSubject] = useState<{ label: string; value: string } | null>(null);
@@ -553,7 +555,12 @@ function BrowseView({
                 <button
                   key={sub.value}
                   type="button"
-                  onClick={() => setSelectedSubject(sub)}
+                  onClick={async () => {
+                    setSelectedSubject(sub);
+                    setSelectedGrade(null);
+                    setSelectedYear(null);
+                    await onSelectSubject(sub.value);
+                  }}
                   className="glass-card p-10 rounded-[2.5rem] group cursor-pointer border-neutral-50 text-left"
                 >
                   <div className="w-16 h-16 bg-neutral-50 rounded-3xl mb-8 group-hover:bg-[#b5a45d]/10 group-hover:scale-110 transition-all duration-500 flex items-center justify-center">
@@ -585,6 +592,13 @@ function BrowseView({
             <span className="text-neutral-400">|</span>
             <span className="font-semibold text-neutral-800">{selectedSubject.label}</span>
           </div>
+
+          {loadingQuestions && (
+            <div className="rounded-2xl border border-neutral-100 bg-neutral-50/60 p-4 flex items-center gap-3">
+              <RefreshCw className="w-4 h-4 animate-spin text-neutral-500" />
+              <p className="text-sm text-neutral-600">Loading exams for {selectedSubject.label}…</p>
+            </div>
+          )}
 
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-400 mb-3">Grade</p>
@@ -1177,6 +1191,9 @@ export default function HSCGeneratorPage() {
   const [isDevMode, setIsDevMode] = useState(false);
   const [devTab, setDevTab] = useState<'add' | 'manage' | 'review'>('add');
   const [allQuestions, setAllQuestions] = useState<any[]>([]);
+  const [browseQuestions, setBrowseQuestions] = useState<any[]>([]);
+  const [browseQuestionsSubject, setBrowseQuestionsSubject] = useState<string>('');
+  const [browseLoadingQuestions, setBrowseLoadingQuestions] = useState(false);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
   const [questionsFetchError, setQuestionsFetchError] = useState<string | null>(null);
   const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
@@ -1660,6 +1677,34 @@ export default function HSCGeneratorPage() {
     });
   }, [allQuestions]);
 
+  const browseAvailablePapers = useMemo(() => {
+    const map = new Map<string, { year: string; subject: string; grade: string; school: string; count: number }>();
+    browseQuestions.forEach((q) => {
+      if (!q?.year || !q?.subject || !q?.grade) return;
+      const year = String(q.year);
+      const subject = String(q.subject);
+      const grade = String(q.grade);
+      const school = String(q.school_name || 'HSC');
+      const key = `${year}__${grade}__${subject}__${school}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(key, { year, subject, grade, school, count: 1 });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      const yearCompare = Number(b.year) - Number(a.year);
+      if (yearCompare !== 0) return yearCompare;
+      const gradeCompare = a.grade.localeCompare(b.grade);
+      if (gradeCompare !== 0) return gradeCompare;
+      const subjectCompare = a.subject.localeCompare(b.subject);
+      if (subjectCompare !== 0) return subjectCompare;
+      return a.school.localeCompare(b.school);
+    });
+  }, [browseQuestions]);
+
   useEffect(() => {
     if (!availablePapers.length) {
       setSelectedSyllabusMappingPaper('');
@@ -1951,14 +1996,6 @@ export default function HSCGeneratorPage() {
       setImageMapDraftById({});
     }
   }, [viewMode, devTab]);
-
-  useEffect(() => {
-    if (viewMode === 'papers' || viewMode === 'paper' || viewMode === 'browse' || viewMode === 'builder' || viewMode === 'settings') {
-      if (!allQuestions.length && !loadingQuestions) {
-        fetchAllQuestions();
-      }
-    }
-  }, [viewMode, allQuestions.length, loadingQuestions]);
 
   const runSyllabusDotPointMapping = async () => {
     if (!selectedSyllabusMappingPaper) {
@@ -3199,6 +3236,55 @@ export default function HSCGeneratorPage() {
     }
   };
 
+  const fetchBrowseQuestionsForSubject = async (subjectValue: string) => {
+    const normalizedSubject = String(subjectValue || '').trim();
+    if (!normalizedSubject) {
+      setBrowseQuestions([]);
+      setBrowseQuestionsSubject('');
+      return;
+    }
+
+    if (browseQuestionsSubject === normalizedSubject && browseQuestions.length > 0) {
+      return;
+    }
+
+    try {
+      setBrowseLoadingQuestions(true);
+      setQuestionsFetchError(null);
+
+      const params = new URLSearchParams({ subject: normalizedSubject });
+      const response = await fetch(`/api/hsc/all-questions?${params.toString()}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const msg = data?.details ?? data?.error ?? `Failed to fetch questions (${response.status})`;
+        throw new Error(msg);
+      }
+
+      const rows = Array.isArray(data) ? data : [];
+      const uniqueById = new Map<string, any>();
+      rows.forEach((row) => {
+        const id = String(row?.id || '');
+        if (!id) return;
+        uniqueById.set(id, row);
+      });
+
+      setBrowseQuestions(Array.from(uniqueById.values()));
+      setBrowseQuestionsSubject(normalizedSubject);
+    } catch (err) {
+      const msg = getFetchErrorMessage(err, 'Failed to fetch questions');
+      setQuestionsFetchError(msg);
+      setBrowseQuestions([]);
+      setBrowseQuestionsSubject(normalizedSubject);
+      if (isExpectedFetchError(err)) {
+        console.warn('[fetchBrowseQuestionsForSubject]', msg);
+      } else {
+        console.error('Error fetching browse questions:', err);
+      }
+    } finally {
+      setBrowseLoadingQuestions(false);
+    }
+  };
+
   const applyManageFilters = async () => {
     if (!hasManageFilters) {
       alert('Apply at least one filter before loading questions.');
@@ -4259,7 +4345,8 @@ export default function HSCGeneratorPage() {
   };
 
   const startPaperAttempt = (paper: { year: string; subject: string; grade: string; school: string; count: number }) => {
-    const matching = allQuestions
+    const questionPool = browseQuestions.length ? browseQuestions : allQuestions;
+    const matching = questionPool
       .filter(
         (q) =>
           String(q.year) === paper.year &&
@@ -4816,8 +4903,9 @@ export default function HSCGeneratorPage() {
               {viewMode === 'browse' && (
                 <BrowseView
                   setViewMode={setViewMode}
-                  availablePapers={availablePapers}
-                  loadingQuestions={loadingQuestions}
+                  availablePapers={browseAvailablePapers}
+                  loadingQuestions={browseLoadingQuestions}
+                  onSelectSubject={fetchBrowseQuestionsForSubject}
                   startPaperAttempt={startPaperAttempt}
                 />
               )}
