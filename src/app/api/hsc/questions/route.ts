@@ -1,6 +1,10 @@
 import { supabaseAdmin } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 
+const isMissingColumnError = (message: string) => {
+  return /Could not find the 'exam_incomplete' column|column\s+"?exam_incomplete"?\s+does not exist/i.test(message);
+};
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -9,6 +13,7 @@ export async function GET(request: NextRequest) {
     const year = searchParams.get('year');
     const subject = searchParams.get('subject');
     const topic = searchParams.get('topic');
+    const includeIncomplete = searchParams.get('includeIncomplete') === 'true';
 
     // Build query with filters
     let query = supabaseAdmin.from('hsc_questions').select('*');
@@ -25,8 +30,30 @@ export async function GET(request: NextRequest) {
     if (topic) {
       query = query.eq('topic', topic);
     }
+    if (!includeIncomplete) {
+      query = query.neq('exam_incomplete', true);
+    }
 
-    const { data, error } = await query;
+    let { data, error } = await query;
+
+    if (error && !includeIncomplete && isMissingColumnError(String(error.message || ''))) {
+      let fallbackQuery = supabaseAdmin.from('hsc_questions').select('*');
+      if (grade) {
+        fallbackQuery = fallbackQuery.eq('grade', grade);
+      }
+      if (year) {
+        fallbackQuery = fallbackQuery.eq('year', parseInt(year));
+      }
+      if (subject) {
+        fallbackQuery = fallbackQuery.eq('subject', subject);
+      }
+      if (topic) {
+        fallbackQuery = fallbackQuery.eq('topic', topic);
+      }
+      const fallbackResult = await fallbackQuery;
+      data = fallbackResult.data;
+      error = fallbackResult.error;
+    }
 
     if (error) {
       console.error('[questions] Supabase error:', error.message, error.code);

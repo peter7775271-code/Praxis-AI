@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       school_name,
       paperNumber,
       paperLabel,
+      examIncomplete,
       subject,
       topic,
       subtopic,
@@ -148,6 +149,7 @@ export async function POST(request: Request) {
       graph_image_size: graphImageSize || 'medium',
       paper_number: Number.isInteger(parsedPaperNumber) && parsedPaperNumber > 0 ? parsedPaperNumber : null,
       paper_label: paperLabel || null,
+      ...(typeof examIncomplete === 'boolean' ? { exam_incomplete: examIncomplete } : {}),
     };
 
     const payload: Record<string, unknown> = { ...basePayload };

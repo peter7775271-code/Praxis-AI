@@ -984,11 +984,12 @@ export async function POST(request: Request) {
       return String(content);
     };
 
-    // Default all PDF intake work to GPT-5.2; can be overridden via env vars.
-    const examTextModel = process.env.OPENAI_PDF_EXAM_MODEL || 'gpt-5.2';
+    // Default all PDF intake work to GPT-5.4; can be overridden via env vars.
+    const defaultPdfModel = process.env.OPENAI_PDF_MODEL || 'gpt-5.4';
+    const examTextModel = process.env.OPENAI_PDF_EXAM_MODEL || defaultPdfModel;
     const criteriaTextModel =
-      process.env.OPENAI_PDF_CRITERIA_MODEL || 'gpt-5.2';
-    const examVisionModel = process.env.OPENAI_PDF_VISION_MODEL || 'gpt-5.2';
+      process.env.OPENAI_PDF_CRITERIA_MODEL || defaultPdfModel;
+    const examVisionModel = process.env.OPENAI_PDF_VISION_MODEL || defaultPdfModel;
 
     const chunkResponses: Array<{ source: 'exam' | 'criteria'; index: number; content: string }> = [];
     const refusals: Array<{ source: 'exam' | 'criteria'; index: number; content: string }> = [];

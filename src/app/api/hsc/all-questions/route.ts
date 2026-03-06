@@ -1,5 +1,9 @@
 import { supabaseAdmin } from '@/lib/db';
 
+const isMissingColumnError = (message: string) => {
+  return /Could not find the 'exam_incomplete' column|column\s+"?exam_incomplete"?\s+does not exist/i.test(message);
+};
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -11,8 +15,9 @@ export async function GET(request: Request) {
     const questionType = searchParams.get('questionType');
     const search = searchParams.get('search');
     const missingImagesOnly = searchParams.get('missingImagesOnly') === 'true';
+    const includeIncomplete = searchParams.get('includeIncomplete') === 'true';
 
-    const buildQuery = () => {
+    const buildQuery = (excludeIncomplete: boolean) => {
       let query = supabaseAdmin
         .from('hsc_questions')
         .select('*')
@@ -26,6 +31,9 @@ export async function GET(request: Request) {
       if (questionType && questionType !== 'all') query = query.eq('question_type', questionType);
       if (missingImagesOnly) {
         query = query.eq('graph_image_size', 'missing').is('graph_image_data', null);
+      }
+      if (excludeIncomplete) {
+        query = query.neq('exam_incomplete', true);
       }
       if (search) {
         const escaped = search.trim().replace(/,/g, '\\,');
@@ -42,12 +50,26 @@ export async function GET(request: Request) {
     const PAGE_SIZE = 1000;
     let from = 0;
     const allRows: any[] = [];
+    let shouldExcludeIncomplete = !includeIncomplete;
+    let hasRetriedWithoutIncompleteFilter = false;
 
     while (true) {
       const to = from + PAGE_SIZE - 1;
-      const { data, error } = await buildQuery().range(from, to);
+      const { data, error } = await buildQuery(shouldExcludeIncomplete).range(from, to);
 
       if (error) {
+        if (
+          shouldExcludeIncomplete
+          && !hasRetriedWithoutIncompleteFilter
+          && isMissingColumnError(String(error.message || ''))
+        ) {
+          hasRetriedWithoutIncompleteFilter = true;
+          shouldExcludeIncomplete = false;
+          from = 0;
+          allRows.length = 0;
+          continue;
+        }
+
         console.error('[all-questions] Supabase error:', error.message, error.code);
         return Response.json(
           { error: 'Failed to fetch questions', details: error.message, code: error.code },

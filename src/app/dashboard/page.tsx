@@ -1026,6 +1026,7 @@ export default function HSCGeneratorPage() {
     mcq_option_d_image?: string | null;
     mcq_correct_answer?: 'A' | 'B' | 'C' | 'D' | null;
     mcq_explanation?: string | null;
+    exam_incomplete?: boolean | null;
     _display_group_key?: string | null;
   };
 
@@ -1055,6 +1056,13 @@ export default function HSCGeneratorPage() {
       message.includes('fetch failed') ||
       message.includes('failed to fetch')
     );
+  };
+
+  const isExamIncomplete = (value: unknown) => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value === 1;
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 't';
   };
 
   const fetchWithTimeout = async (url: string, timeoutMs = 10000) => {
@@ -1217,6 +1225,9 @@ export default function HSCGeneratorPage() {
   const [manageSortKey, setManageSortKey] = useState<'question_number' | 'year' | 'subject' | 'grade' | 'marks' | 'topic' | 'school'>('question_number');
   const [manageSortDirection, setManageSortDirection] = useState<'asc' | 'desc'>('asc');
   const [manageSubView, setManageSubView] = useState<'list' | 'image-map'>('list');
+  const [selectedVisibilityExamKey, setSelectedVisibilityExamKey] = useState('');
+  const [examVisibilityUpdatingKey, setExamVisibilityUpdatingKey] = useState('');
+  const [examVisibilityMessage, setExamVisibilityMessage] = useState<string | null>(null);
   const [imageMapSelectedPaperKey, setImageMapSelectedPaperKey] = useState('');
   const [imageMapQuestions, setImageMapQuestions] = useState<any[]>([]);
   const [imageMapDraftById, setImageMapDraftById] = useState<Record<string, {
@@ -1649,9 +1660,73 @@ export default function HSCGeneratorPage() {
     };
   }, [allQuestions]);
 
+  const visibleAllQuestions = useMemo(
+    () => allQuestions.filter((q) => !isExamIncomplete(q?.exam_incomplete)),
+    [allQuestions]
+  );
+
+  const manageExamBuckets = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        year: string;
+        subject: string;
+        grade: string;
+        school: string;
+        count: number;
+        incompleteCount: number;
+      }
+    >();
+
+    allQuestions.forEach((q) => {
+      if (!q?.year || !q?.subject || !q?.grade) return;
+      const year = String(q.year);
+      const subject = String(q.subject);
+      const grade = String(q.grade);
+      const school = String(q.school_name || 'HSC');
+      const key = `${year}__${grade}__${subject}__${school}`;
+      const existing = map.get(key);
+      const incrementIncomplete = isExamIncomplete(q?.exam_incomplete) ? 1 : 0;
+      if (existing) {
+        existing.count += 1;
+        existing.incompleteCount += incrementIncomplete;
+      } else {
+        map.set(key, {
+          year,
+          subject,
+          grade,
+          school,
+          count: 1,
+          incompleteCount: incrementIncomplete,
+        });
+      }
+    });
+
+    return Array.from(map.values())
+      .map((exam) => ({
+        ...exam,
+        key: getPaperKey(exam),
+        status:
+          exam.incompleteCount === 0
+            ? 'complete'
+            : exam.incompleteCount === exam.count
+              ? 'incomplete'
+              : 'mixed',
+      }))
+      .sort((a, b) => {
+        const yearCompare = Number(b.year) - Number(a.year);
+        if (yearCompare !== 0) return yearCompare;
+        const gradeCompare = a.grade.localeCompare(b.grade);
+        if (gradeCompare !== 0) return gradeCompare;
+        const subjectCompare = a.subject.localeCompare(b.subject);
+        if (subjectCompare !== 0) return subjectCompare;
+        return a.school.localeCompare(b.school);
+      });
+  }, [allQuestions]);
+
   const availablePapers = useMemo(() => {
     const map = new Map<string, { year: string; subject: string; grade: string; school: string; count: number }>();
-    allQuestions.forEach((q) => {
+    visibleAllQuestions.forEach((q) => {
       if (!q?.year || !q?.subject || !q?.grade) return;
       const year = String(q.year);
       const subject = String(q.subject);
@@ -1675,7 +1750,7 @@ export default function HSCGeneratorPage() {
       if (subjectCompare !== 0) return subjectCompare;
       return a.school.localeCompare(b.school);
     });
-  }, [allQuestions]);
+  }, [visibleAllQuestions]);
 
   const browseAvailablePapers = useMemo(() => {
     const map = new Map<string, { year: string; subject: string; grade: string; school: string; count: number }>();
@@ -1977,7 +2052,7 @@ export default function HSCGeneratorPage() {
   // Fetch questions when entering review tab
   useEffect(() => {
     if (viewMode === 'dev-questions' && devTab === 'review') {
-      fetchAllQuestions();
+      fetchAllQuestions({ includeIncomplete: true });
     }
   }, [viewMode, devTab]);
 
@@ -2226,6 +2301,18 @@ export default function HSCGeneratorPage() {
     const availableIds = new Set(allQuestions.map((q) => q.id));
     setSelectedManageQuestionIds((prev) => prev.filter((id) => availableIds.has(id)));
   }, [allQuestions, selectedManageQuestionIds.length]);
+
+  useEffect(() => {
+    if (!manageExamBuckets.length) {
+      setSelectedVisibilityExamKey('');
+      return;
+    }
+
+    setSelectedVisibilityExamKey((prev) => {
+      if (prev && manageExamBuckets.some((exam) => exam.key === prev)) return prev;
+      return manageExamBuckets[0].key;
+    });
+  }, [manageExamBuckets]);
 
   useEffect(() => {
     if (manageSubView !== 'image-map') return;
@@ -3208,11 +3295,16 @@ export default function HSCGeneratorPage() {
     });
   };
 
-  const fetchAllQuestions = async () => {
+  const fetchAllQuestions = async (options?: { includeIncomplete?: boolean }) => {
     try {
       setLoadingQuestions(true);
       setQuestionsFetchError(null);
-      const response = await fetch('/api/hsc/all-questions');
+      const params = new URLSearchParams();
+      if (options?.includeIncomplete) {
+        params.set('includeIncomplete', 'true');
+      }
+      const url = params.toString() ? `/api/hsc/all-questions?${params.toString()}` : '/api/hsc/all-questions';
+      const response = await fetch(url);
       const data = await response.json().catch(() => ({}));
       if (response.ok) {
         setAllQuestions(Array.isArray(data) ? data : []);
@@ -3303,6 +3395,7 @@ export default function HSCGeneratorPage() {
       if (manageFilterSchool) params.set('school', manageFilterSchool);
       if (manageFilterType !== 'all') params.set('questionType', manageFilterType);
       if (manageMissingImagesOnly) params.set('missingImagesOnly', 'true');
+      params.set('includeIncomplete', 'true');
       const search = manageSearchQuery.trim();
       if (search) params.set('search', search);
 
@@ -3358,7 +3451,7 @@ export default function HSCGeneratorPage() {
   const openManageImageMap = async () => {
     setManageSubView('image-map');
     if (!allQuestions.length && !loadingQuestions) {
-      await fetchAllQuestions();
+      await fetchAllQuestions({ includeIncomplete: true });
     }
   };
 
@@ -3687,6 +3780,66 @@ export default function HSCGeneratorPage() {
     });
   };
 
+  const setSelectedExamIncomplete = async (isIncomplete: boolean) => {
+    if (!selectedVisibilityExamKey) return;
+
+    const selectedExam = manageExamBuckets.find((exam) => exam.key === selectedVisibilityExamKey);
+    if (!selectedExam) return;
+
+    const matchesExam = (q: any) => (
+      String(q?.year || '') === selectedExam.year
+      && String(q?.grade || '') === selectedExam.grade
+      && String(q?.subject || '') === selectedExam.subject
+      && String(q?.school_name || 'HSC') === selectedExam.school
+    );
+
+    try {
+      setExamVisibilityUpdatingKey(selectedExam.key);
+      setExamVisibilityMessage(null);
+
+      const response = await fetch('/api/hsc/exam-visibility', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          year: selectedExam.year,
+          grade: selectedExam.grade,
+          subject: selectedExam.subject,
+          school: selectedExam.school,
+          isIncomplete,
+        }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || `Failed to update exam visibility (${response.status})`);
+      }
+
+      setAllQuestions((prev) => prev.map((q) => (matchesExam(q) ? { ...q, exam_incomplete: isIncomplete } : q)));
+      setBrowseQuestions((prev) => (
+        isIncomplete
+          ? prev.filter((q) => !matchesExam(q))
+          : prev
+      ));
+
+      if (manageQuestionDraft && matchesExam(manageQuestionDraft)) {
+        setManageQuestionDraft({ ...manageQuestionDraft, exam_incomplete: isIncomplete });
+      }
+      if (inlineEditDraft && matchesExam(inlineEditDraft)) {
+        setInlineEditDraft({ ...inlineEditDraft, exam_incomplete: isIncomplete });
+      }
+
+      setExamVisibilityMessage(
+        isIncomplete
+          ? `Marked ${selectedExam.year} • ${selectedExam.grade} • ${selectedExam.subject} • ${selectedExam.school} as incomplete.`
+          : `Marked ${selectedExam.year} • ${selectedExam.grade} • ${selectedExam.subject} • ${selectedExam.school} as complete.`
+      );
+    } catch (err) {
+      setExamVisibilityMessage(err instanceof Error ? err.message : 'Failed to update exam visibility');
+    } finally {
+      setExamVisibilityUpdatingKey('');
+    }
+  };
+
   const autoGroupSubpartQuestions = () => {
     const source = filteredManageQuestions.length ? filteredManageQuestions : allQuestions;
     if (!source.length) return;
@@ -3764,6 +3917,7 @@ export default function HSCGeneratorPage() {
     syllabusDotPoint: draft.syllabus_dot_point || null,
     paperNumber: draft.paper_number || null,
     paperLabel: draft.paper_label || null,
+    examIncomplete: isExamIncomplete(draft.exam_incomplete),
     marks: draft.marks,
     questionNumber: draft.question_number,
     questionText: draft.question_text,
@@ -3800,6 +3954,7 @@ export default function HSCGeneratorPage() {
       school_name: String(rawQuestion?.school_name || 'HSC'),
       paper_number: rawQuestion?.paper_number ?? null,
       paper_label: String(rawQuestion?.paper_label || ''),
+      exam_incomplete: isExamIncomplete(rawQuestion?.exam_incomplete),
       topic: fallbackTopic,
       subtopic: String(rawQuestion?.subtopic || ''),
       syllabus_dot_point: String(rawQuestion?.syllabus_dot_point || ''),
@@ -4345,7 +4500,7 @@ export default function HSCGeneratorPage() {
   };
 
   const startPaperAttempt = (paper: { year: string; subject: string; grade: string; school: string; count: number }) => {
-    const questionPool = browseQuestions.length ? browseQuestions : allQuestions;
+    const questionPool = browseQuestions.length ? browseQuestions : visibleAllQuestions;
     const matching = questionPool
       .filter(
         (q) =>
@@ -4412,14 +4567,14 @@ export default function HSCGeneratorPage() {
   };
 
   const loadQuestionsForBuilder = async () => {
-    if (allQuestions.length) return allQuestions as Question[];
+    if (allQuestions.length) return visibleAllQuestions as Question[];
     try {
       setLoadingQuestions(true);
       const response = await fetch('/api/hsc/all-questions');
       const data = await response.json().catch(() => ([]));
       const rows = Array.isArray(data) ? data : [];
       setAllQuestions(rows);
-      return rows as Question[];
+      return rows.filter((q) => !isExamIncomplete((q as any)?.exam_incomplete)) as Question[];
     } catch (err) {
       console.error('Error loading questions for builder:', err);
       return [] as Question[];
@@ -8195,6 +8350,63 @@ POINT_1 ...`}
 
                         {manageSubView === 'list' ? (
                           <div>
+                        <div className="mb-4 rounded-xl border p-4" style={{ borderColor: 'var(--clr-surface-tonal-a20)', backgroundColor: 'var(--clr-surface-a05)' }}>
+                          <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                            <div className="lg:w-[420px]">
+                              <label className="block text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--clr-surface-a40)' }}>
+                                Exam Visibility (Dev)
+                              </label>
+                              <select
+                                value={selectedVisibilityExamKey}
+                                onChange={(e) => setSelectedVisibilityExamKey(e.target.value)}
+                                disabled={!manageExamBuckets.length || !!examVisibilityUpdatingKey}
+                                className="w-full px-3 py-2 rounded-lg border text-sm"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                  color: 'var(--clr-primary-a50)',
+                                }}
+                              >
+                                {manageExamBuckets.length === 0 ? (
+                                  <option value="">No exams loaded</option>
+                                ) : (
+                                  manageExamBuckets.map((exam) => (
+                                    <option key={exam.key} value={exam.key}>
+                                      {exam.year} • {exam.grade} • {exam.subject} • {exam.school} ({exam.count}) [{exam.status}]
+                                    </option>
+                                  ))
+                                )}
+                              </select>
+                            </div>
+
+                            <div className="flex items-center gap-2 pt-1 lg:pt-6">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedExamIncomplete(true)}
+                                disabled={!selectedVisibilityExamKey || !!examVisibilityUpdatingKey}
+                                className="px-3 py-2 rounded-lg text-sm font-medium cursor-pointer disabled:opacity-50"
+                                style={{ backgroundColor: 'var(--clr-warning-a0)', color: 'var(--clr-light-a0)' }}
+                              >
+                                {examVisibilityUpdatingKey ? 'Updating…' : 'Mark Incomplete'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedExamIncomplete(false)}
+                                disabled={!selectedVisibilityExamKey || !!examVisibilityUpdatingKey}
+                                className="px-3 py-2 rounded-lg text-sm font-medium cursor-pointer disabled:opacity-50"
+                                style={{ backgroundColor: 'var(--clr-success-a0)', color: 'var(--clr-light-a0)' }}
+                              >
+                                {examVisibilityUpdatingKey ? 'Updating…' : 'Mark Complete'}
+                              </button>
+                            </div>
+                          </div>
+                          {examVisibilityMessage && (
+                            <p className="mt-2 text-sm" style={{ color: 'var(--clr-surface-a50)' }}>
+                              {examVisibilityMessage}
+                            </p>
+                          )}
+                        </div>
+
                         <div className="flex flex-wrap items-center gap-3 mb-4">
                           <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--clr-surface-a50)' }}>
                             <input
@@ -8512,6 +8724,11 @@ POINT_1 ...`}
                                               {!q.graph_image_data && q.graph_image_size === 'missing' && (
                                                 <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--clr-warning-a0)', color: 'var(--clr-light-a0)' }}>Missing Image</span>
                                               )}
+                                              {isExamIncomplete(q.exam_incomplete) && (
+                                                <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--clr-warning-a0)', color: 'var(--clr-light-a0)' }}>
+                                                  Incomplete Exam
+                                                </span>
+                                              )}
                                               <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-surface-a50)' }}>{q.year}</span>
                                               {q.school_name && (
                                                 <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-surface-a50)' }}>{q.school_name}</span>
@@ -8558,6 +8775,11 @@ POINT_1 ...`}
                                           </span>
                                           <h3 className="text-2xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>{manageQuestionDraft.subject}</h3>
                                           <p className="text-sm" style={{ color: 'var(--clr-surface-a40)' }}>{manageQuestionDraft.topic}</p>
+                                          {isExamIncomplete(manageQuestionDraft.exam_incomplete) && (
+                                            <span className="inline-flex mt-2 text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--clr-warning-a0)', color: 'var(--clr-light-a0)' }}>
+                                              Incomplete Exam
+                                            </span>
+                                          )}
                                         </div>
                                         <div className="text-right">
                                           <span className="block font-bold text-lg" style={{ color: 'var(--clr-primary-a50)' }}>Question {manageQuestionDraft.question_number || ''}</span>
