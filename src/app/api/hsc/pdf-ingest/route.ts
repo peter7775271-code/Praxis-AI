@@ -318,13 +318,13 @@ For each NON-multiple-choice (written-response) question, you must follow this e
 QUESTION_NUMBER X
 NUM_MARKS X
 TOPIC X
-HAS_IMAGE {TRUE/FALSE}
+HAS_IMAGE <TRUE/FALSE>
 
 QUESTION_CONTENT
-{question written in LaTeX code...}
+<question written in LaTeX code...>
 
 SAMPLE_ANSWER
-{fully worked solution written in LaTeX code...}
+<fully worked solution written in LaTeX code...>
 ${includeMarkingCriteria ? "\nMARKING_CRITERIA\n{Use one line per mark: MARKS_1 ... MARKS_2 ... based on the total marks. Keep it concise and aligned to the question.}\n" : ''}
 
 For each MULTIPLE-CHOICE question you must follow this structure instead:
@@ -336,14 +336,14 @@ HAS_IMAGE {TRUE/FALSE}
 QUESTION_TYPE MULTIPLE_CHOICE
 
 QUESTION_CONTENT
-{question stem written in LaTeX code...}
+<question stem written in LaTeX code...>
 
-MCQ_OPTION_A {text for option A in LaTeX}
-MCQ_OPTION_B {text for option B in LaTeX}
-MCQ_OPTION_C {text for option C in LaTeX}
-MCQ_OPTION_D {text for option D in LaTeX}
+MCQ_OPTION_A <text for option A in LaTeX>
+MCQ_OPTION_B <text for option B in LaTeX>
+MCQ_OPTION_C <text for option C in LaTeX>
+MCQ_OPTION_D <text for option D in LaTeX>
 MCQ_CORRECT_ANSWER {A|B|C|D}
-MCQ_EXPLANATION {detailed LaTeX explanation: why the correct option is right, why the others are wrong; format in clear steps with blank lines between ideas so a student can follow easily}
+MCQ_EXPLANATION <detailed LaTeX explanation: why the correct option is right, why the others are wrong; format in clear steps with blank lines between ideas so a student can follow easily>
 
 RENDER-SAFE LaTeX rules (follow so output renders correctly):
 - Inline math: use $...$ for short expressions in prose (e.g. $x = 5$, $\\frac{1}{2}$). You may also use \\( ... \\).
@@ -984,12 +984,11 @@ export async function POST(request: Request) {
       return String(content);
     };
 
-    // Default all PDF intake work to GPT-5.4; can be overridden via env vars.
-    const defaultPdfModel = process.env.OPENAI_PDF_MODEL || 'gpt-5.4';
-    const examTextModel = process.env.OPENAI_PDF_EXAM_MODEL || defaultPdfModel;
-    const criteriaTextModel =
-      process.env.OPENAI_PDF_CRITERIA_MODEL || defaultPdfModel;
-    const examVisionModel = process.env.OPENAI_PDF_VISION_MODEL || defaultPdfModel;
+    // Hard-pin ingest extraction to GPT-5.4 to avoid accidental model drift via env vars.
+    const ingestModel = 'gpt-5.4';
+    const examTextModel = ingestModel;
+    const criteriaTextModel = ingestModel;
+    const examVisionModel = ingestModel;
 
     const chunkResponses: Array<{ source: 'exam' | 'criteria'; index: number; content: string }> = [];
     const refusals: Array<{ source: 'exam' | 'criteria'; index: number; content: string }> = [];
