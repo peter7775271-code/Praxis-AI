@@ -2,7 +2,7 @@ import { Pool, type PoolConfig } from 'pg';
 
 type DbRow = Record<string, unknown>;
 
-type QueryResultPayload<T = unknown> = {
+type QueryResultPayload<T = any> = {
   data: T;
   error: DbClientError | null;
   count?: number | null;
@@ -237,7 +237,7 @@ const buildSelectClause = (table: string, columns: string) => {
     .join(', ');
 };
 
-class PostgresQueryBuilder implements PromiseLike<QueryResultPayload<unknown>> {
+class PostgresQueryBuilder implements PromiseLike<QueryResultPayload<any>> {
   private action: QueryAction = 'select';
   private filters: BuilderFilter[] = [];
   private orderClauses: OrderClause[] = [];
@@ -353,8 +353,8 @@ class PostgresQueryBuilder implements PromiseLike<QueryResultPayload<unknown>> {
     return this;
   }
 
-  then<TResult1 = QueryResultPayload<unknown>, TResult2 = never>(
-    onfulfilled?: ((value: QueryResultPayload<unknown>) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = QueryResultPayload<any>, TResult2 = never>(
+    onfulfilled?: ((value: QueryResultPayload<any>) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     return this.execute().then(onfulfilled, onrejected);
@@ -362,7 +362,7 @@ class PostgresQueryBuilder implements PromiseLike<QueryResultPayload<unknown>> {
 
   catch<TResult = never>(
     onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null,
-  ): Promise<QueryResultPayload<unknown> | TResult> {
+  ): Promise<QueryResultPayload<any> | TResult> {
     return this.execute().catch(onrejected);
   }
 
@@ -605,7 +605,7 @@ class PostgresQueryBuilder implements PromiseLike<QueryResultPayload<unknown>> {
     };
   }
 
-  async execute(): Promise<QueryResultPayload<unknown>> {
+  async execute(): Promise<QueryResultPayload<any>> {
     try {
       if (this.action === 'select') {
         return await this.executeSelect();

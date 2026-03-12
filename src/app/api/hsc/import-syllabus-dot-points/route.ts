@@ -134,7 +134,7 @@ const chunkArray = <T>(items: T[], chunkSize: number) => {
   return chunks;
 };
 
-const runSupabaseWithRetry = async <T>(operation: () => Promise<{ data: T; error: any }>) => {
+const runSupabaseWithRetry = async <T>(operation: () => PromiseLike<{ data: T; error: any }>) => {
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= MAX_DB_RETRIES; attempt += 1) {

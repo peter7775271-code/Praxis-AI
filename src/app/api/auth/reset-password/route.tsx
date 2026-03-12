@@ -2,6 +2,11 @@ import { supabaseAdmin } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { updateUserPassword } from "@/lib/auth";
 
+type ResetPasswordUser = {
+  email: string;
+  reset_token_expiry: string | null;
+};
+
 export async function POST(request: NextRequest) {
   try {
     const { token, password } = await request.json();
@@ -25,8 +30,9 @@ export async function POST(request: NextRequest) {
       .select('email, reset_token_expiry')
       .eq('reset_token', token)
       .single();
+    const resetUser = user as ResetPasswordUser | null;
     
-    if (findError || !user) {
+    if (findError || !resetUser) {
       return NextResponse.json(
         { error: "Invalid or expired token" },
         { status: 400 }
@@ -34,7 +40,7 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date();
-    if (user.reset_token_expiry && new Date(user.reset_token_expiry) < now) {
+    if (resetUser.reset_token_expiry && new Date(resetUser.reset_token_expiry) < now) {
       return NextResponse.json(
         { error: "Token has expired" },
         { status: 400 }
@@ -42,14 +48,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Update password and clear reset token
-    await updateUserPassword(user.email, password);
+    await updateUserPassword(resetUser.email, password);
     await supabaseAdmin
       .from('users')
       .update({
         reset_token: null,
         reset_token_expiry: null
       })
-      .eq('email', user.email);
+      .eq('email', resetUser.email);
 
     return NextResponse.json(
       { message: "Password reset successfully" },
