@@ -304,6 +304,9 @@ function FilterPanel({
   );
 }
 
+const LIMIT_OPTIONS = [50, 100, 250, 500] as const;
+type LimitOption = (typeof LIMIT_OPTIONS)[number] | "all";
+
 export function InteractiveLogsTable() {
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -313,6 +316,7 @@ export function InteractiveLogsTable() {
     subject: [],
     grade: [],
   });
+  const [limit, setLimit] = useState<LimitOption>(100);
   const [logs, setLogs] = useState<QuestionLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -394,6 +398,17 @@ export function InteractiveLogsTable() {
     filters.subject.length +
     filters.grade.length;
 
+  const visibleLogs =
+    limit === "all" ? filteredLogs : filteredLogs.slice(0, limit);
+
+  const subtitle = loading
+    ? "Loading…"
+    : error
+    ? error
+    : limit !== "all" && filteredLogs.length > limit
+    ? `Showing ${visibleLogs.length} of ${filteredLogs.length} filtered (${logs.length} total) — increase limit to see more`
+    : `${filteredLogs.length} of ${logs.length} questions`;
+
   return (
     <main className="h-full w-full bg-background">
       <div className="flex h-full flex-col">
@@ -403,13 +418,7 @@ export function InteractiveLogsTable() {
               <h1 className="text-2xl font-semibold text-foreground">
                 Upload Logs
               </h1>
-              <p className="text-sm text-muted-foreground">
-                {loading
-                  ? "Loading…"
-                  : error
-                  ? error
-                  : `${filteredLogs.length} of ${logs.length} questions`}
-              </p>
+              <p className="text-sm text-muted-foreground">{subtitle}</p>
             </div>
 
             <div className="flex gap-2">
@@ -422,6 +431,22 @@ export function InteractiveLogsTable() {
                   className="h-9 pl-9 text-sm"
                 />
               </div>
+              <select
+                value={String(limit)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setLimit(val === "all" ? "all" : (Number(val) as LimitOption));
+                }}
+                className="h-9 rounded-md border border-input bg-transparent px-2 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                aria-label="Entries to show"
+              >
+                {LIMIT_OPTIONS.map((n) => (
+                  <option key={n} value={String(n)}>
+                    Show {n}
+                  </option>
+                ))}
+                <option value="all">Show all</option>
+              </select>
               <Button
                 variant={showFilters ? "default" : "outline"}
                 size="sm"
@@ -471,8 +496,8 @@ export function InteractiveLogsTable() {
             ) : (
               <div className="divide-y divide-border">
                 <AnimatePresence mode="popLayout">
-                  {filteredLogs.length > 0 ? (
-                    filteredLogs.map((log, index) => (
+                  {visibleLogs.length > 0 ? (
+                    visibleLogs.map((log, index) => (
                       <motion.div
                         key={log.id}
                         initial={{ opacity: 0, y: -10 }}
