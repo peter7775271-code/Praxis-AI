@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { User } from '@/lib/auth';
 import { supabaseAdmin } from "@/lib/db";
 
 // Verifies a user's email using token
@@ -16,8 +17,9 @@ export async function GET(request: NextRequest) {
       .select('id')
       .eq('verification_token', token)
       .single();
+    const matchingUser = user as Pick<User, 'id'> | null;
 
-    if (findError || !user) {
+    if (findError || !matchingUser) {
       return NextResponse.json({ error: "Invalid token" }, { status: 400 });
     }
 
@@ -28,7 +30,7 @@ export async function GET(request: NextRequest) {
         verified: true,
         verification_token: null
       })
-      .eq('id', user.id);
+      .eq('id', matchingUser.id);
 
     // redirect to dashboard after success
     return NextResponse.redirect(new URL("/login", request.url));

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 const nodemailer = require("nodemailer");
 import { v4 as uuidv4 } from 'uuid';
+import type { User } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
@@ -20,15 +21,16 @@ export async function POST(request: NextRequest) {
       .select('id, verified')
       .eq('email', email)
       .single();
+    const existingUser = user as Pick<User, 'id' | 'verified'> | null;
     
-    if (findError || !user) {
+    if (findError || !existingUser) {
       return NextResponse.json(
         { error: 'User not found' },
         { status: 404 }
       );
     }
 
-    if (user.verified) {
+    if (existingUser.verified) {
       return NextResponse.json(
         { error: 'Email already verified' },
         { status: 400 }

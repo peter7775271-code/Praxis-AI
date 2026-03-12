@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUser, createToken } from '@/lib/auth';
+import type { User } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
@@ -29,7 +30,9 @@ export async function POST(request: NextRequest) {
       .select('verified')
       .eq('id', user.id)
       .single();
-    if (!dbUser?.verified) {
+    const verifiedUser = dbUser as Pick<User, 'verified'> | null;
+
+    if (!verifiedUser?.verified) {
       return NextResponse.json(
         { error: 'Please verify your email first. Check your inbox for the verification link.' },
         { status: 403 }
