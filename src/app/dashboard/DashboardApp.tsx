@@ -82,6 +82,14 @@ import type {
   HeatmapCell,
   TopicStat,
 } from './types';
+import { ComboboxDemo } from '@/components/ui/demo';
+import type {
+  Filter as ManageQuestionChipFilter,
+  FilterConfig as ManageQuestionFilterConfig,
+  FilterOption as ManageQuestionFilterOption,
+} from '@/components/ui/filters';
+import { FilterType as ManageQuestionFilterType } from '@/components/ui/filters';
+import { Sidebar, SidebarBody } from '@/components/ui/sidebar';
 import { parseCriteriaForDisplay, stripOuterBraces } from './view-helpers';
 import InlineQuestionEditorModal from './InlineQuestionEditorModal';
 import EditQuestionModal from './EditQuestionModal';
@@ -134,6 +142,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     year: number;
     subject: string;
     paper_number?: number | null;
+    group_id?: string | null;
     topic: string;
     subtopic?: string | null;
     syllabus_dot_point?: string | null;
@@ -231,11 +240,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [yearLevel, setYearLevel] = useState<'Year 11' | 'Year 12'>('Year 12');
   const [isGenerating, setIsGenerating] = useState(false);
   const [showAnswer, setShowAnswer] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const sidebarRef = useRef<HTMLElement | null>(null);
-  const sidebarHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [appState, setAppState] = useState<'idle' | 'marking' | 'reviewed'>('idle');
   const [canvasHeight, setCanvasHeight] = useState(500);
   const [isEraser, setIsEraser] = useState(false);
@@ -355,14 +362,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [inlineEditSaving, setInlineEditSaving] = useState(false);
   const [selectedManageQuestionIds, setSelectedManageQuestionIds] = useState<string[]>([]);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
-  const [manageMissingImagesOnly, setManageMissingImagesOnly] = useState(false);
+  const [manageFilters, setManageFilters] = useState<ManageQuestionChipFilter[]>([]);
   const [manageSearchQuery, setManageSearchQuery] = useState('');
-  const [manageFilterGrade, setManageFilterGrade] = useState<string>('');
-  const [manageFilterYear, setManageFilterYear] = useState<string>('');
-  const [manageFilterSubject, setManageFilterSubject] = useState<string>('');
-  const [manageFilterTopic, setManageFilterTopic] = useState<string>('');
-  const [manageFilterSchool, setManageFilterSchool] = useState<string>('');
-  const [manageFilterType, setManageFilterType] = useState<'all' | 'written' | 'multiple_choice'>('all');
   const [manageFiltersApplied, setManageFiltersApplied] = useState(false);
   const [manageSortKey, setManageSortKey] = useState<'question_number' | 'year' | 'subject' | 'grade' | 'marks' | 'topic' | 'school'>('question_number');
   const [manageSortDirection, setManageSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -382,8 +383,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     mcq_correct_answer: 'A' | 'B' | 'C' | 'D';
   }>>({});
   const [imageMapSaving, setImageMapSaving] = useState(false);
-  const [customExamGroupByQuestionId, setCustomExamGroupByQuestionId] = useState<Record<string, string>>({});
-  const [customExamGroupsHydrated, setCustomExamGroupsHydrated] = useState(false);
+  const [selectedGroupingPaperKey, setSelectedGroupingPaperKey] = useState('');
+  const [groupingPaperLoading, setGroupingPaperLoading] = useState(false);
+  const [groupingPaperMessage, setGroupingPaperMessage] = useState<string | null>(null);
   const [selectedVerifySolutionsExamKey, setSelectedVerifySolutionsExamKey] = useState('');
   const [verifySolutionsApplyUpdates, setVerifySolutionsApplyUpdates] = useState(false);
   const [isVerifyingSolutions, setIsVerifyingSolutions] = useState(false);
@@ -482,6 +484,147 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     const romanMap: Record<string, number> = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10 };
     const subpart = roman ? (romanMap[roman] || 0) : 0;
     return { number, part, subpart, raw };
+  };
+
+  const customExamGroupByQuestionId = useMemo(() => {
+    const grouped: Record<string, string> = {};
+    allQuestions.forEach((question) => {
+      const questionId = String(question?.id || '').trim();
+      const groupId = String(question?.group_id || '').trim();
+      if (questionId && groupId) {
+        grouped[questionId] = groupId;
+      }
+    });
+    return grouped;
+  }, [allQuestions]);
+
+  const buildGroupingPaperKey = (paper: {
+    year: string;
+    grade: string;
+    subject: string;
+    school: string;
+    paperNumber: number | null;
+  }) => {
+    return `${paper.year}__${paper.grade}__${paper.subject}__${paper.school}__${paper.paperNumber ?? 'none'}`;
+  };
+
+  const isGroupingEligibleSubject = (subjectValue: string | null | undefined) => {
+    const normalized = String(subjectValue || '').trim().toLowerCase();
+    return normalized === 'mathematics' || normalized === 'mathematics advanced';
+  };
+
+  const applyQuestionGroupUpdates = (updatedQuestions: Array<{ id: string; group_id?: string | null }>) => {
+    const updatedById = new Map(
+      updatedQuestions
+        .map((question) => [String(question?.id || '').trim(), question?.group_id ?? null] as const)
+        .filter(([id]) => Boolean(id))
+    );
+
+    if (!updatedById.size) return;
+
+    const applyToRows = <T extends { id: string; group_id?: string | null }>(rows: T[]) => {
+      return rows.map((row) => {
+        if (!updatedById.has(row.id)) return row;
+        return {
+          ...row,
+          group_id: updatedById.get(row.id) ?? null,
+        };
+      });
+    };
+
+    setAllQuestions((prev) => applyToRows(prev));
+    setBrowseQuestions((prev) => applyToRows(prev));
+    setPaperQuestions((prev) => {
+      const next = applyToRows(prev);
+      if (isPaperMode && next.length > 0) {
+        const safeIndex = Math.min(paperIndex, next.length - 1);
+        const { group } = getDisplayGroupAt(next, safeIndex);
+        if (group.length > 0) {
+          setQuestion(mergeGroupForDisplay(group));
+        }
+      }
+      return next;
+    });
+
+    setManageQuestionDraft((prev: any) => {
+      if (!prev?.id || !updatedById.has(prev.id)) return prev;
+      return {
+        ...prev,
+        group_id: updatedById.get(prev.id) ?? null,
+      };
+    });
+
+    setInlineEditDraft((prev: any) => {
+      if (!prev?.id || !updatedById.has(prev.id)) return prev;
+      return {
+        ...prev,
+        group_id: updatedById.get(prev.id) ?? null,
+      };
+    });
+  };
+
+  const getSelectedQuestionsForGrouping = () => {
+    const selectedSet = new Set(selectedManageQuestionIds);
+    return allQuestions.filter((question) => selectedSet.has(question.id)) as Question[];
+  };
+
+  const validateSelectedQuestionsForGrouping = (questions: Question[]) => {
+    if (questions.length < 2) {
+      return { ok: false, message: 'Select at least two related subparts to create a group.' };
+    }
+
+    const first = questions[0];
+    const firstParsed = parseQuestionNumberForSort(first.question_number);
+    if (!Number.isFinite(firstParsed.number) || !firstParsed.part) {
+      return { ok: false, message: 'Only lettered subparts such as 11(a), 11(b), or 11(a)(i) can be grouped.' };
+    }
+
+    const firstSignature = [
+      String(first.grade || ''),
+      String(first.subject || ''),
+      String(first.year || ''),
+      String(first.school_name || 'HSC'),
+      String(first.paper_number ?? ''),
+      String(firstParsed.number),
+    ].join('|');
+
+    for (const question of questions) {
+      const parsed = parseQuestionNumberForSort(question.question_number);
+      const signature = [
+        String(question.grade || ''),
+        String(question.subject || ''),
+        String(question.year || ''),
+        String(question.school_name || 'HSC'),
+        String(question.paper_number ?? ''),
+        String(parsed.number),
+      ].join('|');
+
+      if (!Number.isFinite(parsed.number) || !parsed.part) {
+        return { ok: false, message: 'Grouping only applies to lettered subparts and their nested roman numeral parts.' };
+      }
+
+      if (signature !== firstSignature) {
+        return { ok: false, message: 'Grouped questions must come from the same paper and the same main question number.' };
+      }
+    }
+
+    return { ok: true, message: '' };
+  };
+
+  const getGroupBadgeLabel = (groupId: string | null | undefined) => {
+    const normalized = String(groupId || '').trim();
+    if (!normalized) return '';
+
+    const paperQuestionMatch = normalized.match(/::q(\d+)$/i);
+    if (paperQuestionMatch?.[1]) {
+      return `Grouped Q${paperQuestionMatch[1]}`;
+    }
+
+    if (normalized.startsWith('manual-group::')) {
+      return 'Manual Group';
+    }
+
+    return 'Grouped';
   };
 
   const expandManualGroupedSelection = (
@@ -665,6 +808,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const getQuestionDisplayGroupKey = (question: Question): string => {
     const explicitGroupKey = String(question._display_group_key || '').trim();
     if (explicitGroupKey) return explicitGroupKey;
+    const persistedGroupKey = String(question.group_id || '').trim();
+    if (persistedGroupKey) return `persisted:${persistedGroupKey}`;
     return getQuestionParentDisplayBase(question.question_number);
   };
 
@@ -739,7 +884,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
           const label = useRomanOnlyLabels && parts.roman
             ? `(${parts.roman})`
             : useLetterOnlyLabels && parts.letter
-              ? `(${parts.letter})`
+              ? `(${parts.letter})${parts.roman ? `(${parts.roman})` : ''}`
               : q.question_number ?? 'Part';
           return `${formatPartDividerPlaceholder(label)}\n\n${q.question_text}`;
         })
@@ -808,6 +953,123 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     };
   }, [allQuestions]);
 
+  const manageFilterValues = useMemo(() => {
+    const byType = new Map(manageFilters.map((filter) => [filter.type, filter.value]));
+
+    return {
+      grades: byType.get(ManageQuestionFilterType.GRADE) ?? [],
+      years: byType.get(ManageQuestionFilterType.YEAR) ?? [],
+      subjects: byType.get(ManageQuestionFilterType.SUBJECT) ?? [],
+      topics: byType.get(ManageQuestionFilterType.TOPIC) ?? [],
+      schools: byType.get(ManageQuestionFilterType.SCHOOL) ?? [],
+      questionTypes: byType.get(ManageQuestionFilterType.QUESTION_TYPE) ?? [],
+      imageStatus: byType.get(ManageQuestionFilterType.IMAGE_STATUS) ?? [],
+    };
+  }, [manageFilters]);
+
+  const manageMissingImagesOnly = manageFilterValues.imageStatus.includes('missing');
+
+  const manageQuestionFilterConfig = useMemo<ManageQuestionFilterConfig>(() => {
+    const gradeIcon = <GraduationCap className='size-3.5' />;
+    const yearIcon = <History className='size-3.5' />;
+    const subjectIcon = <BookOpen className='size-3.5' />;
+    const topicIcon = <Layers className='size-3.5' />;
+    const schoolIcon = <LayoutDashboard className='size-3.5' />;
+    const typeIcon = <FileText className='size-3.5' />;
+    const imageIcon = <AlertTriangle className='size-3.5' />;
+
+    return {
+      [ManageQuestionFilterType.GRADE]: {
+        icon: gradeIcon,
+        allowMultiple: true,
+        options: manageFilterOptions.grades.map((grade) => ({
+          name: grade,
+          label: grade,
+          icon: gradeIcon,
+        })),
+      },
+      [ManageQuestionFilterType.YEAR]: {
+        icon: yearIcon,
+        allowMultiple: true,
+        options: manageFilterOptions.years.map((year) => ({
+          name: year,
+          label: year,
+          icon: yearIcon,
+        })),
+      },
+      [ManageQuestionFilterType.SUBJECT]: {
+        icon: subjectIcon,
+        allowMultiple: true,
+        options: manageFilterOptions.subjects.map((subject) => ({
+          name: subject,
+          label: subject,
+          icon: subjectIcon,
+        })),
+      },
+      [ManageQuestionFilterType.TOPIC]: {
+        icon: topicIcon,
+        allowMultiple: true,
+        options: manageFilterOptions.topics.map((topic) => ({
+          name: topic,
+          label: topic,
+          icon: topicIcon,
+        })),
+      },
+      [ManageQuestionFilterType.SCHOOL]: {
+        icon: schoolIcon,
+        allowMultiple: true,
+        options: manageFilterOptions.schools.map((school) => ({
+          name: school,
+          label: school,
+          icon: schoolIcon,
+        })),
+      },
+      [ManageQuestionFilterType.QUESTION_TYPE]: {
+        icon: typeIcon,
+        allowMultiple: true,
+        options: [
+          {
+            name: 'written',
+            label: 'Written Response',
+            icon: typeIcon,
+          },
+          {
+            name: 'multiple_choice',
+            label: 'Multiple Choice',
+            icon: CheckCircle2 ? <CheckCircle2 className='size-3.5' /> : typeIcon,
+          },
+        ],
+      },
+      [ManageQuestionFilterType.IMAGE_STATUS]: {
+        icon: imageIcon,
+        options: [
+          {
+            name: 'missing',
+            label: 'Missing graph images',
+            icon: imageIcon,
+          },
+        ],
+      },
+    };
+  }, [manageFilterOptions]);
+
+  const manageQuestionFilterGroups = useMemo<ManageQuestionFilterOption[][]>(
+    () => [
+      [
+        { name: ManageQuestionFilterType.GRADE, icon: manageQuestionFilterConfig[ManageQuestionFilterType.GRADE].icon },
+        { name: ManageQuestionFilterType.YEAR, icon: manageQuestionFilterConfig[ManageQuestionFilterType.YEAR].icon },
+        { name: ManageQuestionFilterType.SUBJECT, icon: manageQuestionFilterConfig[ManageQuestionFilterType.SUBJECT].icon },
+        { name: ManageQuestionFilterType.TOPIC, icon: manageQuestionFilterConfig[ManageQuestionFilterType.TOPIC].icon },
+      ],
+      [
+        { name: ManageQuestionFilterType.SCHOOL, icon: manageQuestionFilterConfig[ManageQuestionFilterType.SCHOOL].icon },
+        { name: ManageQuestionFilterType.QUESTION_TYPE, icon: manageQuestionFilterConfig[ManageQuestionFilterType.QUESTION_TYPE].icon },
+        { name: ManageQuestionFilterType.IMAGE_STATUS, icon: manageQuestionFilterConfig[ManageQuestionFilterType.IMAGE_STATUS].icon },
+      ],
+    ],
+    [manageQuestionFilterConfig]
+  );
+
   const visibleAllQuestions = useMemo(
     () => allQuestions.filter((q) => !isExamIncomplete(q?.exam_incomplete)),
     [allQuestions]
@@ -870,6 +1132,54 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         if (subjectCompare !== 0) return subjectCompare;
         return a.school.localeCompare(b.school);
       });
+  }, [allQuestions]);
+
+  const groupingPaperBuckets = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        key: string;
+        year: string;
+        subject: string;
+        grade: string;
+        school: string;
+        paperNumber: number | null;
+        count: number;
+      }
+    >();
+
+    allQuestions.forEach((q) => {
+      if (!q?.year || !q?.subject || !q?.grade || !isGroupingEligibleSubject(String(q.subject))) return;
+      const year = String(q.year);
+      const subject = String(q.subject);
+      const grade = String(q.grade);
+      const school = String(q.school_name || 'HSC');
+      const parsedPaperNumber = Number.parseInt(String(q.paper_number ?? ''), 10);
+      const paperNumber = Number.isInteger(parsedPaperNumber) ? parsedPaperNumber : null;
+      const paper = { year, subject, grade, school, paperNumber };
+      const key = buildGroupingPaperKey(paper);
+      const existing = map.get(key);
+
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(key, {
+          key,
+          ...paper,
+          count: 1,
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      const yearCompare = Number(b.year) - Number(a.year);
+      if (yearCompare !== 0) return yearCompare;
+      const subjectCompare = a.subject.localeCompare(b.subject);
+      if (subjectCompare !== 0) return subjectCompare;
+      const schoolCompare = a.school.localeCompare(b.school);
+      if (schoolCompare !== 0) return schoolCompare;
+      return (a.paperNumber ?? Number.POSITIVE_INFINITY) - (b.paperNumber ?? Number.POSITIVE_INFINITY);
+    });
   }, [allQuestions]);
 
   const availablePapers = useMemo(() => {
@@ -1071,22 +1381,17 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const hasManageFilters = useMemo(() => {
     return (
       manageMissingImagesOnly ||
-      manageFilterType !== 'all' ||
-      Boolean(manageFilterGrade) ||
-      Boolean(manageFilterYear) ||
-      Boolean(manageFilterSubject) ||
-      Boolean(manageFilterTopic) ||
-      Boolean(manageFilterSchool) ||
+      manageFilterValues.grades.length > 0 ||
+      manageFilterValues.years.length > 0 ||
+      manageFilterValues.subjects.length > 0 ||
+      manageFilterValues.topics.length > 0 ||
+      manageFilterValues.schools.length > 0 ||
+      manageFilterValues.questionTypes.length > 0 ||
       Boolean(manageSearchQuery.trim())
     );
   }, [
     manageMissingImagesOnly,
-    manageFilterType,
-    manageFilterGrade,
-    manageFilterYear,
-    manageFilterSubject,
-    manageFilterTopic,
-    manageFilterSchool,
+    manageFilterValues,
     manageSearchQuery,
   ]);
 
@@ -1096,12 +1401,12 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     const search = manageSearchQuery.trim().toLowerCase();
     const filtered = allQuestions.filter((q) => {
       if (manageMissingImagesOnly && (q.graph_image_data || q.graph_image_size !== 'missing')) return false;
-      if (manageFilterGrade && String(q.grade) !== manageFilterGrade) return false;
-      if (manageFilterYear && String(q.year) !== manageFilterYear) return false;
-      if (manageFilterSubject && String(q.subject) !== manageFilterSubject) return false;
-      if (manageFilterTopic && String(q.topic) !== manageFilterTopic) return false;
-      if (manageFilterSchool && String(q.school_name || '') !== manageFilterSchool) return false;
-      if (manageFilterType !== 'all' && String(q.question_type) !== manageFilterType) return false;
+      if (manageFilterValues.grades.length > 0 && !manageFilterValues.grades.includes(String(q.grade))) return false;
+      if (manageFilterValues.years.length > 0 && !manageFilterValues.years.includes(String(q.year))) return false;
+      if (manageFilterValues.subjects.length > 0 && !manageFilterValues.subjects.includes(String(q.subject))) return false;
+      if (manageFilterValues.topics.length > 0 && !manageFilterValues.topics.includes(String(q.topic))) return false;
+      if (manageFilterValues.schools.length > 0 && !manageFilterValues.schools.includes(String(q.school_name || ''))) return false;
+      if (manageFilterValues.questionTypes.length > 0 && !manageFilterValues.questionTypes.includes(String(q.question_type))) return false;
       if (search) {
         const haystack = [q.question_number, q.subject, q.topic, q.question_text, q.grade, q.year, q.school_name]
           .filter(Boolean)
@@ -1144,12 +1449,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     manageFiltersApplied,
     allQuestions,
     manageSearchQuery,
-    manageFilterGrade,
-    manageFilterYear,
-    manageFilterSubject,
-    manageFilterTopic,
-    manageFilterSchool,
-    manageFilterType,
+    manageFilterValues,
+    manageMissingImagesOnly,
     manageSortKey,
     manageSortDirection,
   ]);
@@ -1571,6 +1872,18 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       return manageExamBuckets[0].key;
     });
   }, [manageExamBuckets]);
+
+  useEffect(() => {
+    if (!groupingPaperBuckets.length) {
+      setSelectedGroupingPaperKey('');
+      return;
+    }
+
+    setSelectedGroupingPaperKey((prev) => {
+      if (prev && groupingPaperBuckets.some((paper) => paper.key === prev)) return prev;
+      return groupingPaperBuckets[0].key;
+    });
+  }, [groupingPaperBuckets]);
 
   useEffect(() => {
     if (manageSubView !== 'image-map') return;
@@ -2267,18 +2580,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       if (!response.ok) {
         throw new Error(data?.error || `Failed to upload ${label}`);
       }
-      const autoGroups = data?.autoGroupsByQuestionId;
-      if (autoGroups && typeof autoGroups === 'object' && !Array.isArray(autoGroups)) {
-        setCustomExamGroupByQuestionId((prev) => {
-          const next = { ...prev };
-          Object.entries(autoGroups as Record<string, unknown>).forEach(([questionId, groupLabel]) => {
-            const id = String(questionId || '').trim();
-            const label = String(groupLabel || '').trim();
-            if (!id || !label) return;
-            next[id] = label;
-          });
-          return next;
-        });
+      const updatedQuestions = Array.isArray(data?.updatedQuestions) ? data.updatedQuestions : [];
+      if (updatedQuestions.length > 0) {
+        applyQuestionGroupUpdates(updatedQuestions as Array<{ id: string; group_id?: string | null }>);
       }
       const modelOutput = data?.modelOutput || data?.chatgpt;
       if (modelOutput) {
@@ -2646,12 +2950,12 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       setQuestionsFetchError(null);
 
       const params = new URLSearchParams();
-      if (manageFilterGrade) params.set('grade', manageFilterGrade);
-      if (manageFilterYear) params.set('year', manageFilterYear);
-      if (manageFilterSubject) params.set('subject', manageFilterSubject);
-      if (manageFilterTopic) params.set('topic', manageFilterTopic);
-      if (manageFilterSchool) params.set('school', manageFilterSchool);
-      if (manageFilterType !== 'all') params.set('questionType', manageFilterType);
+      manageFilterValues.grades.forEach((grade) => params.append('grade', grade));
+      manageFilterValues.years.forEach((year) => params.append('year', year));
+      manageFilterValues.subjects.forEach((subject) => params.append('subject', subject));
+      manageFilterValues.topics.forEach((topic) => params.append('topic', topic));
+      manageFilterValues.schools.forEach((school) => params.append('school', school));
+      manageFilterValues.questionTypes.forEach((questionType) => params.append('questionType', questionType));
       if (manageMissingImagesOnly) params.set('missingImagesOnly', 'true');
       params.set('includeIncomplete', 'true');
       const search = manageSearchQuery.trim();
@@ -2689,14 +2993,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   };
 
   const resetManageFilters = () => {
+    setManageFilters([]);
     setManageSearchQuery('');
-    setManageFilterGrade('');
-    setManageFilterYear('');
-    setManageFilterSubject('');
-    setManageFilterTopic('');
-    setManageFilterSchool('');
-    setManageFilterType('all');
-    setManageMissingImagesOnly(false);
     setManageFiltersApplied(false);
     setQuestionsFetchError(null);
     setAllQuestions([]);
@@ -2847,12 +3145,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         alert('Question deleted successfully!');
         // Remove from local list
         setAllQuestions(allQuestions.filter(q => q.id !== questionId));
-        setCustomExamGroupByQuestionId((prev) => {
-          if (!prev[questionId]) return prev;
-          const next = { ...prev };
-          delete next[questionId];
-          return next;
-        });
       } else {
         alert('Failed to delete question');
       }
@@ -2926,17 +3218,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
       const remaining = allQuestions.filter((q) => !selectedManageQuestionIds.includes(q.id));
       setAllQuestions(remaining);
-      setCustomExamGroupByQuestionId((prev) => {
-        let changed = false;
-        const next = { ...prev };
-        selectedManageQuestionIds.forEach((questionId) => {
-          if (next[questionId]) {
-            delete next[questionId];
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
       setSelectedManageQuestionIds([]);
       if (selectedManageQuestionId && selectedManageQuestionIds.includes(selectedManageQuestionId)) {
         setSelectedManageQuestionId(null);
@@ -3005,37 +3286,69 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   };
 
-  const assignSelectedQuestionsToGroup = () => {
+  const assignSelectedQuestionsToGroup = async () => {
     if (!selectedManageQuestionIds.length) return;
 
-    const existingGroupNumbers = Object.values(customExamGroupByQuestionId)
-      .map((value) => Number.parseInt(String(value), 10))
-      .filter((value) => Number.isInteger(value) && value > 0);
-    const nextGroupNumber = existingGroupNumbers.length ? Math.max(...existingGroupNumbers) + 1 : 1;
-    const label = String(nextGroupNumber);
+    const selectedQuestions = getSelectedQuestionsForGrouping();
+    const validation = validateSelectedQuestionsForGrouping(selectedQuestions);
+    if (!validation.ok) {
+      alert(validation.message);
+      return;
+    }
 
-    setCustomExamGroupByQuestionId((prev) => {
-      const next = { ...prev };
-      selectedManageQuestionIds.forEach((questionId) => {
-        next[questionId] = label;
+    try {
+      setBulkActionLoading(true);
+      const response = await fetch('/api/hsc/question-groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'assign',
+          questionIds: selectedManageQuestionIds,
+        }),
       });
-      return next;
-    });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || `Failed to group questions (${response.status})`);
+      }
+
+      const updatedQuestions = Array.isArray(result?.updatedQuestions) ? result.updatedQuestions : [];
+      applyQuestionGroupUpdates(updatedQuestions as Array<{ id: string; group_id?: string | null }>);
+    } catch (err) {
+      console.error('Error grouping selected questions:', err);
+      alert(err instanceof Error ? err.message : 'Failed to group selected questions');
+    } finally {
+      setBulkActionLoading(false);
+    }
   };
 
-  const clearSelectedQuestionGroups = () => {
+  const clearSelectedQuestionGroups = async () => {
     if (!selectedManageQuestionIds.length) return;
-    setCustomExamGroupByQuestionId((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      selectedManageQuestionIds.forEach((questionId) => {
-        if (next[questionId]) {
-          delete next[questionId];
-          changed = true;
-        }
+
+    try {
+      setBulkActionLoading(true);
+      const response = await fetch('/api/hsc/question-groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'clear',
+          questionIds: selectedManageQuestionIds,
+        }),
       });
-      return changed ? next : prev;
-    });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || `Failed to clear question groups (${response.status})`);
+      }
+
+      const updatedQuestions = Array.isArray(result?.updatedQuestions) ? result.updatedQuestions : [];
+      applyQuestionGroupUpdates(updatedQuestions as Array<{ id: string; group_id?: string | null }>);
+    } catch (err) {
+      console.error('Error clearing selected question groups:', err);
+      alert(err instanceof Error ? err.message : 'Failed to clear selected question groups');
+    } finally {
+      setBulkActionLoading(false);
+    }
   };
 
   const setSelectedExamIncomplete = async (isIncomplete: boolean) => {
@@ -3098,70 +3411,53 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   };
 
-  const autoGroupSubpartQuestions = () => {
-    const source = filteredManageQuestions.length ? filteredManageQuestions : allQuestions;
-    if (!source.length) return;
-
-    const grouped = new Map<string, string[]>();
-    source.forEach((question) => {
-      const parsed = parseQuestionNumberForSort(question.question_number);
-      if (!Number.isFinite(parsed.number) || !parsed.part) return;
-
-      const key = [
-        String(question.grade || ''),
-        String(question.subject || ''),
-        String(question.year || ''),
-        String(question.school_name || ''),
-        String(question.paper_number ?? ''),
-        String(parsed.number),
-      ].join('|');
-
-      const existing = grouped.get(key) || [];
-      existing.push(question.id);
-      grouped.set(key, existing);
-    });
-
-    const existingGroupNumbers = Object.values(customExamGroupByQuestionId)
-      .map((value) => Number.parseInt(String(value), 10))
-      .filter((value) => Number.isInteger(value) && value > 0);
-    let nextGroupNumber = existingGroupNumbers.length ? Math.max(...existingGroupNumbers) + 1 : 1;
-
-    let groupsCreated = 0;
-    let questionsAssigned = 0;
-
-    setCustomExamGroupByQuestionId((prev) => {
-      const next = { ...prev };
-
-      grouped.forEach((questionIds) => {
-        if (questionIds.length < 2) return;
-        const label = String(nextGroupNumber++);
-        groupsCreated += 1;
-
-        questionIds.forEach((questionId) => {
-          if (next[questionId] !== label) {
-            next[questionId] = label;
-            questionsAssigned += 1;
-          }
-        });
-      });
-
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('customExamQuestionGroups', JSON.stringify(next));
-        } catch (err) {
-          console.error('Error saving custom exam groups:', err);
-        }
-      }
-
-      return next;
-    });
-
-    if (!groupsCreated) {
-      alert('No lettered subpart groups found in the current question set.');
+  const autoGroupSubpartQuestions = async () => {
+    const selectedPaper = groupingPaperBuckets.find((paper) => paper.key === selectedGroupingPaperKey);
+    if (!selectedPaper) {
+      alert('Select a Mathematics or Mathematics Advanced paper first.');
       return;
     }
 
-    alert(`Auto-grouped ${questionsAssigned} questions across ${groupsCreated} subpart groups.`);
+    try {
+      setGroupingPaperLoading(true);
+      setGroupingPaperMessage(null);
+
+      const response = await fetch('/api/hsc/question-groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'auto-group-paper',
+          year: selectedPaper.year,
+          grade: selectedPaper.grade,
+          subject: selectedPaper.subject,
+          school: selectedPaper.school,
+          paperNumber: selectedPaper.paperNumber,
+        }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result?.error || `Failed to auto-group paper (${response.status})`);
+      }
+
+      const updatedQuestions = Array.isArray(result?.updatedQuestions) ? result.updatedQuestions : [];
+      applyQuestionGroupUpdates(updatedQuestions as Array<{ id: string; group_id?: string | null }>);
+
+      const groupCount = Number(result?.groupCount || 0);
+      const groupedQuestionCount = Number(result?.groupedQuestionCount || 0);
+      const paperLabel = `${selectedPaper.year} • ${selectedPaper.grade} • ${selectedPaper.subject} • ${selectedPaper.school} • ${selectedPaper.paperNumber == null ? 'No paper #' : `Paper ${selectedPaper.paperNumber}`}`;
+
+      setGroupingPaperMessage(
+        groupCount > 0
+          ? `Grouped ${groupedQuestionCount} question rows across ${groupCount} question groups for ${paperLabel}.`
+          : `No eligible multi-part questions were found for ${paperLabel}.`
+      );
+    } catch (err) {
+      console.error('Error auto-grouping paper questions:', err);
+      setGroupingPaperMessage(err instanceof Error ? err.message : 'Failed to auto-group selected paper');
+    } finally {
+      setGroupingPaperLoading(false);
+    }
   };
 
   const buildUpdatePayload = (draft: any) => ({
@@ -3738,12 +4034,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     setShowFinishExamPrompt(false);
     setExamReviewMode(false);
     setExamReviewIndex(0);
-    if (sidebarHideTimeoutRef.current) {
-      clearTimeout(sidebarHideTimeoutRef.current);
-      sidebarHideTimeoutRef.current = null;
-    }
     setSidebarHovered(false);
-    setMobileMenuOpen(false);
   };
 
   const endExam = () => {
@@ -3974,36 +4265,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const stored = JSON.parse(localStorage.getItem('customExamQuestionGroups') || '{}');
-      if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
-        const normalized: Record<string, string> = {};
-        Object.entries(stored as Record<string, unknown>).forEach(([questionId, groupLabel]) => {
-          const id = String(questionId || '').trim();
-          const label = String(groupLabel || '').trim();
-          if (id && label) normalized[id] = label;
-        });
-        setCustomExamGroupByQuestionId(normalized);
-      }
-    } catch (err) {
-      console.error('Error loading custom exam groups:', err);
-    } finally {
-      setCustomExamGroupsHydrated(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!customExamGroupsHydrated) return;
-    try {
-      localStorage.setItem('customExamQuestionGroups', JSON.stringify(customExamGroupByQuestionId));
-    } catch (err) {
-      console.error('Error saving custom exam groups:', err);
-    }
-  }, [customExamGroupByQuestionId, customExamGroupsHydrated]);
-
-  useEffect(() => {
     if (typeof navigator === 'undefined') return;
     const ua = navigator.userAgent || '';
     const isiPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document);
@@ -4016,7 +4277,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       if (!targetNode) return;
       if (sidebarRef.current && !sidebarRef.current.contains(targetNode)) {
         setSidebarHovered(false);
-        setMobileMenuOpen(false);
       }
     };
 
@@ -4054,11 +4314,26 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const isMarking = appState === 'marking';
   const isPaperMode = viewMode === 'paper';
   const isSidebarOpen = sidebarHovered || isSidebarPinned;
-  const isSidebarExpanded = isSidebarOpen || mobileMenuOpen;
-  const sidebarItemLayoutClass = isSidebarExpanded ? 'justify-start px-6' : 'justify-center px-0';
-  const sidebarTextClass = isSidebarExpanded ? 'opacity-100 max-w-[140px]' : 'opacity-0 max-w-0 overflow-hidden';
-  const sidebarTextTightClass = isSidebarExpanded ? 'opacity-100 max-w-[120px]' : 'opacity-0 max-w-0 overflow-hidden';
-  const sidebarBrandTextClass = isSidebarExpanded ? 'opacity-100 max-w-[200px]' : 'opacity-0 max-w-0 overflow-hidden';
+  const [sidebarContentExpanded, setSidebarContentExpanded] = useState(false);
+
+  useEffect(() => {
+    if (isSidebarOpen) {
+      setSidebarContentExpanded(true);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSidebarContentExpanded(false);
+    }, 180);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isSidebarOpen]);
+
+  const sidebarItemLayoutClass = 'justify-start pl-[21px] pr-4';
+  const sidebarItemGapClass = 'gap-3';
+  const sidebarTextClass = sidebarContentExpanded ? 'opacity-100 max-w-[140px]' : 'opacity-0 max-w-0 overflow-hidden';
+  const sidebarTextTightClass = sidebarContentExpanded ? 'opacity-100 max-w-[120px]' : 'opacity-0 max-w-0 overflow-hidden';
+  const sidebarBrandTextClass = sidebarContentExpanded ? 'opacity-100 max-w-[200px]' : 'opacity-0 max-w-0 overflow-hidden';
   const paperProgress = paperQuestions.length ? (paperIndex + 1) / paperQuestions.length : 0;
   const examTimeRemainingLabel = useMemo(() => {
     if (examRemainingMs === null) return null;
@@ -4140,108 +4415,69 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         setDraft={setInlineEditDraft}
       />
 
-      {/* Mobile Header */}
-      <div className="lg:hidden flex items-center justify-between px-3 py-2 border-b border-neutral-100 sticky top-0 z-40 bg-white/80 backdrop-blur-md">
-        <button
-          type="button"
-          onClick={() => router.push('/')}
-          className="flex items-center gap-1.5 cursor-pointer"
-        >
-          <div className="w-7 h-7 bg-neutral-900 rounded-md flex items-center justify-center text-white font-serif italic text-lg">∑</div>
-          <span className="hidden sm:inline font-bold text-base text-neutral-800">Praxis AI</span>
-        </button>
-        <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 text-neutral-600 hover:text-neutral-900 cursor-pointer">
-          {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
-      </div>
+      <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
+        <div ref={sidebarRef} className="flex-shrink-0">
+          <Sidebar open={isSidebarOpen} setOpen={setSidebarHovered}>
+            <SidebarBody className="justify-between gap-0 border-r border-neutral-200 bg-white px-0 py-4 shadow-[4px_0_24px_rgba(0,0,0,0.08)] md:shadow-none">
+              <div className="flex h-full flex-col">
+                <div className={`mb-2 flex w-full flex-shrink-0 items-center p-3 ${sidebarContentExpanded ? 'gap-2 px-3' : 'justify-center'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setIsSidebarPinned((prev) => !prev)}
+                    className="hidden cursor-pointer rounded-lg p-2 transition-colors hover:bg-neutral-100 md:inline-flex"
+                    aria-label="Toggle sidebar pin"
+                  >
+                    <Menu size={18} className="text-neutral-700" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      router.push('/');
+                      setSidebarHovered(false);
+                    }}
+                    className={`flex items-center overflow-hidden transition-all duration-200 cursor-pointer ${sidebarContentExpanded ? 'opacity-100 max-w-[220px]' : 'opacity-0 max-w-0 pointer-events-none md:pointer-events-auto md:opacity-100 md:max-w-[2rem]'}`}
+                  >
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-neutral-900 font-serif text-lg italic text-white">∑</div>
+                    <span className={`ml-2 whitespace-nowrap font-bold tracking-tight text-neutral-800 transition-all duration-200 ${sidebarBrandTextClass}`}>
+                      Praxis <span className="font-light text-neutral-400">AI</span>
+                    </span>
+                  </button>
+                </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div
-          className={`hidden lg:block flex-shrink-0 transition-all duration-300 ease-in-out ${isSidebarPinned ? 'w-56 xl:w-60' : 'w-[3.75rem]'}`}
-        />
-
-        {/* Sidebar: on desktop collapses to icon strip when not hovered; full width when hovered */}
-        <aside
-          ref={sidebarRef}
-          className={`
-            fixed inset-y-0 left-0 z-60 lg:z-40 border-r border-neutral-100 flex flex-col bg-white
-            transition-all duration-300 ease-in-out
-            ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
-            ${isSidebarExpanded ? 'w-52 lg:w-56 xl:w-60 shadow-[4px_0_24px_rgba(0,0,0,0.08)] border-r-neutral-200' : 'w-[3.75rem] shadow-none'}
-            lg:pointer-events-auto
-          `}
-          onMouseEnter={() => {
-            if (sidebarHideTimeoutRef.current) {
-              clearTimeout(sidebarHideTimeoutRef.current);
-              sidebarHideTimeoutRef.current = null;
-            }
-            setSidebarHovered(true);
-          }}
-          onMouseLeave={() => {
-            sidebarHideTimeoutRef.current = setTimeout(() => {
-              setSidebarHovered(false);
-              sidebarHideTimeoutRef.current = null;
-            }, 150);
-          }}
-        >
-          <div className={`w-full p-3 mb-2 flex-shrink-0 flex items-center ${isSidebarExpanded ? 'gap-2 px-3' : 'justify-center'}`}>
-            <button
-              type="button"
-              onClick={() => setIsSidebarPinned((prev) => !prev)}
-              className="p-2 rounded-lg hover:bg-neutral-100 transition-colors cursor-pointer"
-              aria-label="Toggle sidebar pin"
-            >
-              <Menu size={18} className="text-neutral-700" />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                router.push('/');
-                setMobileMenuOpen(false);
-              }}
-              className={`flex items-center overflow-hidden transition-all duration-200 cursor-pointer ${isSidebarExpanded ? 'opacity-100 max-w-[180px]' : 'opacity-0 max-w-0 pointer-events-none'}`}
-            >
-              <div className="w-7 h-7 shrink-0 bg-neutral-900 rounded-md flex items-center justify-center text-white font-serif italic text-lg">∑</div>
-              <span className={`ml-2 font-bold text-base tracking-tight text-neutral-800 whitespace-nowrap transition-all duration-200 ${sidebarBrandTextClass}`}>
-                Praxis <span className="text-neutral-400 font-light">AI</span>
-              </span>
-            </button>
-          </div>
-
-          <nav className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar space-y-0">
-            <button onClick={() => { setViewMode('dashboard'); router.push('/dashboard'); setMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${viewMode === 'dashboard' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+                <nav className="custom-scrollbar flex-1 space-y-0 overflow-y-auto overflow-x-hidden">
+                  <button onClick={() => { setViewMode('dashboard'); router.push('/dashboard'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'dashboard' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <LayoutDashboard size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Dashboard</span>
             </button>
-            <button onClick={() => { setViewMode('browse'); router.push('/dashboard/browse'); setMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${viewMode === 'browse' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+            <button onClick={() => { setViewMode('browse'); router.push('/dashboard/browse'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'browse' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <BookOpen size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Browse Bank</span>
             </button>
-            <button onClick={() => { setViewMode('analytics'); router.push('/dashboard/analytics'); setMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${viewMode === 'analytics' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+            <button onClick={() => { setViewMode('analytics'); router.push('/dashboard/analytics'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'analytics' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <LineChart size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Analytics Hub</span>
             </button>
-            <button onClick={() => { setViewMode('builder'); clearPaperState(); router.push('/dashboard/builder'); setMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${viewMode === 'builder' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+            <button onClick={() => { setViewMode('builder'); clearPaperState(); router.push('/dashboard/builder'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'builder' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <PlusCircle size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Exam Architect</span>
             </button>
-            <button onClick={() => { setViewMode('formulas'); router.push('/dashboard/formulas'); setMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${viewMode === 'formulas' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+            <button onClick={() => { setViewMode('formulas'); router.push('/dashboard/formulas'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'formulas' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <Sigma size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Formula Vault</span>
             </button>
-            <button onClick={() => { loadSavedAttempts(); setViewMode('saved'); router.push('/dashboard/saved'); setMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${viewMode === 'saved' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+            <button onClick={() => { loadSavedAttempts(); setViewMode('saved'); router.push('/dashboard/saved'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'saved' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <Bookmark size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Saved Content</span>
-              {savedAttempts.length > 0 && isSidebarExpanded && <span className="text-xs text-neutral-400">({savedAttempts.length})</span>}
+              {savedAttempts.length > 0 && sidebarContentExpanded && <span className="text-xs text-neutral-400">({savedAttempts.length})</span>}
             </button>
-            <button onClick={() => { setViewMode('history'); router.push('/dashboard/history'); setMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${viewMode === 'history' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+            <button onClick={() => { setViewMode('history'); router.push('/dashboard/history'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'history' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <History size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>My History</span>
             </button>
-            {viewMode === 'saved' && savedAttempts.length > 0 && isSidebarExpanded && (
+            {viewMode === 'saved' && savedAttempts.length > 0 && sidebarContentExpanded && (
               <div className="space-y-0 px-2 pb-2">
                 {savedAttempts.map((attempt) => (
-                  <button key={attempt.id} onClick={() => { setSelectedAttempt(attempt); setMobileMenuOpen(false); }} className={`w-full text-left p-3 rounded-lg transition-colors text-sm cursor-pointer ${selectedAttempt?.id === attempt.id ? 'bg-neutral-100 text-neutral-900 font-medium' : 'text-neutral-600 hover:bg-neutral-50'}`}>
+                  <button key={attempt.id} onClick={() => { setSelectedAttempt(attempt); setSidebarHovered(false); }} className={`w-full text-left p-3 rounded-lg transition-colors text-sm cursor-pointer ${selectedAttempt?.id === attempt.id ? 'bg-neutral-100 text-neutral-900 font-medium' : 'text-neutral-600 hover:bg-neutral-50'}`}>
                     <div className="font-medium truncate">{attempt.subject}</div>
                     <div className="text-xs text-neutral-400 truncate">{attempt.topic}</div>
                     <div className="text-xs mt-1 text-neutral-400">{attempt.marks}m • {new Date(attempt.savedAt).toLocaleDateString()}</div>
@@ -4249,27 +4485,30 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                 ))}
               </div>
             )}
-            <button onClick={() => { setViewMode('syllabus'); router.push('/dashboard/syllabus'); setMobileMenuOpen(false); }} className={`w-full flex items-center space-x-3 py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${viewMode === 'syllabus' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+            <button onClick={() => { setViewMode('syllabus'); router.push('/dashboard/syllabus'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'syllabus' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <FileText size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Syllabus</span>
             </button>
             <div className="mt-auto border-t border-neutral-100">
               {isDevMode && (
-                <button onClick={() => { setViewMode('dev-questions'); router.push('/dashboard/dev-questions'); }} className={`w-full flex items-center space-x-3 py-4 text-left cursor-pointer text-amber-700 bg-amber-50 hover:bg-amber-100 font-medium text-sm shrink-0 ${sidebarItemLayoutClass}`}>
+                <button onClick={() => { setViewMode('dev-questions'); router.push('/dashboard/dev-questions'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 text-left cursor-pointer text-amber-700 bg-amber-50 hover:bg-amber-100 font-medium text-sm shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass}`}>
                   <FileText size={18} className="shrink-0" />
                   <span className={`text-sm whitespace-nowrap transition-all duration-200 ${sidebarTextTightClass}`}>Dev Mode ON</span>
                 </button>
               )}
-              <button onClick={() => { setViewMode('settings'); router.push('/dashboard/settings'); }} className={`w-full flex items-center space-x-3 py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${viewMode === 'settings' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+              <button onClick={() => { setViewMode('settings'); router.push('/dashboard/settings'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'settings' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
                 <Settings size={18} className="shrink-0" />
                 <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Settings</span>
               </button>
             </div>
-          </nav>
-        </aside>
+                </nav>
+              </div>
+            </SidebarBody>
+          </Sidebar>
+        </div>
 
         {/* Main Content */}
-        <main className="flex-1 flex flex-col overflow-hidden relative bg-white">
+        <main className="flex-1 flex min-w-0 flex-col overflow-hidden relative bg-white">
           <div className="absolute inset-0 pointer-events-none opacity-[0.03] z-0" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '30px 30px' }} />
           <header className="h-16 border-b border-neutral-100 flex items-center justify-between px-4 lg:px-8 bg-white/80 backdrop-blur-md z-10 flex-shrink-0">
             <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-widest">{viewModeLabel}</h2>
@@ -5804,7 +6043,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                     <div className="text-center py-16">
                       <p className="text-lg" style={{ color: 'var(--clr-warning-a10)' }}>Could not load questions</p>
                       <p className="text-sm mt-2 max-w-md mx-auto" style={{ color: 'var(--clr-surface-a50)' }}>{questionsFetchError}</p>
-                      <p className="text-xs mt-2" style={{ color: 'var(--clr-surface-a40)' }}>Check NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local</p>
+                      <p className="text-xs mt-2" style={{ color: 'var(--clr-surface-a40)' }}>Check DATABASE_URL or NEON_DATABASE_URL in .env.local</p>
                     </div>
                   ) : availablePapers.length === 0 ? (
                     <div className="text-center py-16">
@@ -7665,6 +7904,55 @@ POINT_1 ...`}
                           )}
                         </div>
 
+                        <div className="mb-4 rounded-xl border p-4" style={{ borderColor: 'var(--clr-surface-tonal-a20)', backgroundColor: 'var(--clr-surface-a05)' }}>
+                          <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+                            <div className="lg:w-[520px]">
+                              <label className="block text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--clr-surface-a40)' }}>
+                                Auto-Group Paper Subparts
+                              </label>
+                              <select
+                                value={selectedGroupingPaperKey}
+                                onChange={(e) => setSelectedGroupingPaperKey(e.target.value)}
+                                disabled={!groupingPaperBuckets.length || groupingPaperLoading}
+                                className="w-full px-3 py-2 rounded-lg border text-sm"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                  color: 'var(--clr-primary-a50)',
+                                }}
+                              >
+                                {groupingPaperBuckets.length === 0 ? (
+                                  <option value="">No Mathematics or Mathematics Advanced papers loaded</option>
+                                ) : (
+                                  groupingPaperBuckets.map((paper) => (
+                                    <option key={paper.key} value={paper.key}>
+                                      {paper.year} • {paper.grade} • {paper.subject} • {paper.school} • {paper.paperNumber == null ? 'No paper #' : `Paper ${paper.paperNumber}`} ({paper.count})
+                                    </option>
+                                  ))
+                                )}
+                              </select>
+                              <p className="mt-2 text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
+                                This groups lettered subparts like 11(a), 11(b), 11(c), and any nested roman numeral parts under the same main question.
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={autoGroupSubpartQuestions}
+                              disabled={!selectedGroupingPaperKey || groupingPaperLoading}
+                              className="px-3 py-2 rounded-lg text-sm font-medium cursor-pointer disabled:opacity-50"
+                              style={{ backgroundColor: 'var(--clr-primary-a0)', color: 'var(--clr-dark-a0)' }}
+                            >
+                              {groupingPaperLoading ? 'Grouping…' : 'Auto-Group Selected Paper'}
+                            </button>
+                          </div>
+                          {groupingPaperMessage && (
+                            <p className="mt-2 text-sm" style={{ color: 'var(--clr-surface-a50)' }}>
+                              {groupingPaperMessage}
+                            </p>
+                          )}
+                        </div>
+
                         <div className="flex flex-wrap items-center gap-3 mb-4">
                           <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--clr-surface-a50)' }}>
                             <input
@@ -7703,7 +7991,7 @@ POINT_1 ...`}
                             className="px-3 py-2 rounded-lg text-sm font-medium cursor-pointer disabled:opacity-50"
                             style={{ backgroundColor: 'var(--clr-primary-a0)', color: 'var(--clr-dark-a0)' }}
                           >
-                            Assign Next Group
+                            Group Selected
                           </button>
                           <button
                             onClick={clearSelectedQuestionGroups}
@@ -7713,177 +8001,95 @@ POINT_1 ...`}
                           >
                             Clear Group
                           </button>
-                          <button
-                            onClick={autoGroupSubpartQuestions}
-                            disabled={allQuestions.length === 0 || bulkActionLoading}
-                            className="px-3 py-2 rounded-lg text-sm font-medium cursor-pointer disabled:opacity-50"
-                            style={{ backgroundColor: 'var(--clr-primary-a0)', color: 'var(--clr-dark-a0)' }}
-                          >
-                            Auto-Group Subparts
-                          </button>
-                          <button
-                            onClick={() => setManageMissingImagesOnly((prev) => !prev)}
-                            className="px-3 py-2 rounded-lg text-sm font-medium cursor-pointer"
-                            style={{
-                              backgroundColor: manageMissingImagesOnly ? 'var(--clr-warning-a0)' : 'var(--clr-surface-a20)',
-                              color: manageMissingImagesOnly ? 'var(--clr-light-a0)' : 'var(--clr-primary-a50)',
-                            }}
-                          >
-                            {manageMissingImagesOnly ? 'Showing Missing Images' : 'Show Missing Images'}
-                          </button>
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-8 gap-3 mb-6">
-                          <input
-                            type="text"
-                            value={manageSearchQuery}
-                            onChange={(e) => setManageSearchQuery(e.target.value)}
-                            placeholder="Search question number, topic, text..."
-                            className="lg:col-span-2 px-3 py-2 rounded-lg border text-sm"
-                            style={{
-                              backgroundColor: 'var(--clr-surface-a0)',
-                              borderColor: 'var(--clr-surface-tonal-a20)',
-                              color: 'var(--clr-primary-a50)',
-                            }}
-                          />
-                          <select
-                            value={manageFilterGrade}
-                            onChange={(e) => setManageFilterGrade(e.target.value)}
-                            className="px-3 py-2 rounded-lg border text-sm"
-                            style={{
-                              backgroundColor: 'var(--clr-surface-a0)',
-                              borderColor: 'var(--clr-surface-tonal-a20)',
-                              color: 'var(--clr-primary-a50)',
-                            }}
-                          >
-                            <option value="">All Grades</option>
-                            {manageFilterOptions.grades.map((grade) => (
-                              <option key={grade} value={grade}>{grade}</option>
-                            ))}
-                          </select>
-                          <select
-                            value={manageFilterYear}
-                            onChange={(e) => setManageFilterYear(e.target.value)}
-                            className="px-3 py-2 rounded-lg border text-sm"
-                            style={{
-                              backgroundColor: 'var(--clr-surface-a0)',
-                              borderColor: 'var(--clr-surface-tonal-a20)',
-                              color: 'var(--clr-primary-a50)',
-                            }}
-                          >
-                            <option value="">All Years</option>
-                            {manageFilterOptions.years.map((year) => (
-                              <option key={year} value={year}>{year}</option>
-                            ))}
-                          </select>
-                          <select
-                            value={manageFilterSubject}
-                            onChange={(e) => setManageFilterSubject(e.target.value)}
-                            className="px-3 py-2 rounded-lg border text-sm"
-                            style={{
-                              backgroundColor: 'var(--clr-surface-a0)',
-                              borderColor: 'var(--clr-surface-tonal-a20)',
-                              color: 'var(--clr-primary-a50)',
-                            }}
-                          >
-                            <option value="">All Subjects</option>
-                            {manageFilterOptions.subjects.map((subject) => (
-                              <option key={subject} value={subject}>{subject}</option>
-                            ))}
-                          </select>
-                          <select
-                            value={manageFilterSchool}
-                            onChange={(e) => setManageFilterSchool(e.target.value)}
-                            className="px-3 py-2 rounded-lg border text-sm"
-                            style={{
-                              backgroundColor: 'var(--clr-surface-a0)',
-                              borderColor: 'var(--clr-surface-tonal-a20)',
-                              color: 'var(--clr-primary-a50)',
-                            }}
-                          >
-                            <option value="">All Schools</option>
-                            {manageFilterOptions.schools.map((school) => (
-                              <option key={school} value={school}>{school}</option>
-                            ))}
-                          </select>
-                          <select
-                            value={manageFilterTopic}
-                            onChange={(e) => setManageFilterTopic(e.target.value)}
-                            className="px-3 py-2 rounded-lg border text-sm"
-                            style={{
-                              backgroundColor: 'var(--clr-surface-a0)',
-                              borderColor: 'var(--clr-surface-tonal-a20)',
-                              color: 'var(--clr-primary-a50)',
-                            }}
-                          >
-                            <option value="">All Topics</option>
-                            {manageFilterOptions.topics.map((topic) => (
-                              <option key={topic} value={topic}>{topic}</option>
-                            ))}
-                          </select>
-                          <select
-                            value={manageFilterType}
-                            onChange={(e) => setManageFilterType(e.target.value as 'all' | 'written' | 'multiple_choice')}
-                            className="px-3 py-2 rounded-lg border text-sm"
-                            style={{
-                              backgroundColor: 'var(--clr-surface-a0)',
-                              borderColor: 'var(--clr-surface-tonal-a20)',
-                              color: 'var(--clr-primary-a50)',
-                            }}
-                          >
-                            <option value="all">All Types</option>
-                            <option value="written">Written Response</option>
-                            <option value="multiple_choice">Multiple Choice</option>
-                          </select>
-                          <div className="flex gap-2">
-                            <select
-                              value={manageSortKey}
-                              onChange={(e) => setManageSortKey(e.target.value as typeof manageSortKey)}
-                              className="flex-1 px-3 py-2 rounded-lg border text-sm"
-                              style={{
-                                backgroundColor: 'var(--clr-surface-a0)',
-                                borderColor: 'var(--clr-surface-tonal-a20)',
-                                color: 'var(--clr-primary-a50)',
-                              }}
-                            >
-                              <option value="question_number">Sort by Question #</option>
-                              <option value="year">Sort by Year</option>
-                              <option value="grade">Sort by Grade</option>
-                              <option value="subject">Sort by Subject</option>
-                              <option value="topic">Sort by Topic</option>
-                              <option value="school">Sort by School</option>
-                              <option value="marks">Sort by Marks</option>
-                            </select>
-                            <button
-                              type="button"
-                              onClick={() => setManageSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
-                              className="px-3 py-2 rounded-lg border text-sm font-medium"
-                              style={{
-                                backgroundColor: 'var(--clr-surface-a0)',
-                                borderColor: 'var(--clr-surface-tonal-a20)',
-                                color: 'var(--clr-primary-a50)',
-                              }}
-                            >
-                              {manageSortDirection === 'asc' ? '↑' : '↓'}
-                            </button>
+                        <div className="mb-6 rounded-xl border p-4" style={{ borderColor: 'var(--clr-surface-tonal-a20)', backgroundColor: 'var(--clr-surface-a05)' }}>
+                          <div className="flex flex-col gap-4">
+                            <div className="flex flex-col xl:flex-row xl:items-start gap-3">
+                              <div className="relative flex-1 min-w-0 xl:max-w-xl">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--clr-surface-a40)' }} />
+                                <input
+                                  type="text"
+                                  value={manageSearchQuery}
+                                  onChange={(e) => setManageSearchQuery(e.target.value)}
+                                  placeholder="Search question number, topic, text, school..."
+                                  className="w-full rounded-lg border py-2 pl-9 pr-3 text-sm"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                />
+                              </div>
+                              <ComboboxDemo
+                                filters={manageFilters}
+                                setFilters={setManageFilters}
+                                config={manageQuestionFilterConfig}
+                                filterGroups={manageQuestionFilterGroups}
+                                triggerLabel="Add filter"
+                                clearLabel="Clear chips"
+                              />
+                            </div>
+
+                            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                              <div className="flex gap-2 flex-wrap">
+                                <select
+                                  value={manageSortKey}
+                                  onChange={(e) => setManageSortKey(e.target.value as typeof manageSortKey)}
+                                  className="px-3 py-2 rounded-lg border text-sm"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                >
+                                  <option value="question_number">Sort by Question #</option>
+                                  <option value="year">Sort by Year</option>
+                                  <option value="grade">Sort by Grade</option>
+                                  <option value="subject">Sort by Subject</option>
+                                  <option value="topic">Sort by Topic</option>
+                                  <option value="school">Sort by School</option>
+                                  <option value="marks">Sort by Marks</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => setManageSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                                  className="px-3 py-2 rounded-lg border text-sm font-medium"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                >
+                                  {manageSortDirection === 'asc' ? '↑ Asc' : '↓ Desc'}
+                                </button>
+                              </div>
+
+                              <div className="flex gap-2 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={applyManageFilters}
+                                  disabled={loadingQuestions || !hasManageFilters}
+                                  className="px-3 py-2 rounded-lg text-sm font-medium cursor-pointer disabled:opacity-50"
+                                  style={{ backgroundColor: 'var(--clr-primary-a0)', color: 'var(--clr-dark-a0)' }}
+                                >
+                                  {loadingQuestions ? 'Applying…' : 'Apply Filters'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={resetManageFilters}
+                                  className="px-3 py-2 rounded-lg text-sm font-medium cursor-pointer"
+                                  style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-primary-a50)' }}
+                                >
+                                  Reset Filters
+                                </button>
+                              </div>
+                            </div>
+
+                            <p className="text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
+                              Add one or more chips for grade, year, subject, topic, school, question type, or missing images, then apply the filter set to load matching questions.
+                            </p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={applyManageFilters}
-                            disabled={loadingQuestions || !hasManageFilters}
-                            className="px-3 py-2 rounded-lg text-sm font-medium cursor-pointer disabled:opacity-50"
-                            style={{ backgroundColor: 'var(--clr-primary-a0)', color: 'var(--clr-dark-a0)' }}
-                          >
-                            {loadingQuestions ? 'Applying…' : 'Apply Filters'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={resetManageFilters}
-                            className="px-3 py-2 rounded-lg text-sm font-medium cursor-pointer"
-                            style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-primary-a50)' }}
-                          >
-                            Reset Filters
-                          </button>
                         </div>
 
                         {!manageFiltersApplied ? (
@@ -7906,7 +8112,7 @@ POINT_1 ...`}
                               <>
                                 <p style={{ color: 'var(--clr-warning-a10)' }}>Could not load questions</p>
                                 <p className="text-sm mt-2 max-w-md mx-auto" style={{ color: 'var(--clr-surface-a50)' }}>{questionsFetchError}</p>
-                                <p className="text-xs mt-2" style={{ color: 'var(--clr-surface-a40)' }}>Check .env.local for Supabase keys</p>
+                                <p className="text-xs mt-2" style={{ color: 'var(--clr-surface-a40)' }}>Check .env.local for your Neon database URL</p>
                               </>
                             ) : (
                               <p style={{ color: 'var(--clr-surface-a40)' }}>No questions found</p>
@@ -7976,7 +8182,7 @@ POINT_1 ...`}
                                               )}
                                               {customExamGroupByQuestionId[q.id] && (
                                                 <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--clr-primary-a0)', color: 'var(--clr-dark-a0)' }}>
-                                                  Group: {customExamGroupByQuestionId[q.id]}
+                                                  {getGroupBadgeLabel(customExamGroupByQuestionId[q.id])}
                                                 </span>
                                               )}
                                               {!q.graph_image_data && q.graph_image_size === 'missing' && (

@@ -7,12 +7,15 @@ const isMissingColumnError = (message: string) => {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const grade = searchParams.get('grade');
-    const year = searchParams.get('year');
-    const subject = searchParams.get('subject');
-    const topic = searchParams.get('topic');
-    const school = searchParams.get('school');
-    const questionType = searchParams.get('questionType');
+    const readValues = (key: string) => searchParams.getAll(key).map((value) => value.trim()).filter(Boolean);
+    const grades = readValues('grade');
+    const years = readValues('year')
+      .map((value) => Number.parseInt(value, 10))
+      .filter((value) => Number.isFinite(value));
+    const subjects = readValues('subject');
+    const topics = readValues('topic');
+    const schools = readValues('school');
+    const questionTypes = readValues('questionType').filter((value) => value !== 'all');
     const search = searchParams.get('search');
     const missingImagesOnly = searchParams.get('missingImagesOnly') === 'true';
     const includeIncomplete = searchParams.get('includeIncomplete') === 'true';
@@ -23,12 +26,18 @@ export async function GET(request: Request) {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (grade) query = query.eq('grade', grade);
-      if (year) query = query.eq('year', Number.parseInt(year, 10));
-      if (subject) query = query.eq('subject', subject);
-      if (topic) query = query.eq('topic', topic);
-      if (school) query = query.eq('school_name', school);
-      if (questionType && questionType !== 'all') query = query.eq('question_type', questionType);
+      if (grades.length === 1) query = query.eq('grade', grades[0]);
+      if (grades.length > 1) query = query.in('grade', grades);
+      if (years.length === 1) query = query.eq('year', years[0]);
+      if (years.length > 1) query = query.in('year', years);
+      if (subjects.length === 1) query = query.eq('subject', subjects[0]);
+      if (subjects.length > 1) query = query.in('subject', subjects);
+      if (topics.length === 1) query = query.eq('topic', topics[0]);
+      if (topics.length > 1) query = query.in('topic', topics);
+      if (schools.length === 1) query = query.eq('school_name', schools[0]);
+      if (schools.length > 1) query = query.in('school_name', schools);
+      if (questionTypes.length === 1) query = query.eq('question_type', questionTypes[0]);
+      if (questionTypes.length > 1) query = query.in('question_type', questionTypes);
       if (missingImagesOnly) {
         query = query.eq('graph_image_size', 'missing').is('graph_image_data', null);
       }

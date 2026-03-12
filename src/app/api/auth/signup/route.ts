@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createUser, getUserByEmail, createToken } from '@/lib/auth';
 import { v4 as uuidv4 } from 'uuid';
 import { supabaseAdmin } from '@/lib/db';
-
-const nodemailer = require('nodemailer');
+import nodemailer from 'nodemailer';
 
 export async function POST(request: NextRequest) {
   try {
@@ -81,14 +80,14 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 }
     );
-  } catch (error: any) {
-    const errorMessage = error?.message || 'Internal server error';
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Internal server error';
     console.error('Sign up error:', { message: errorMessage, error });
     
     // Check if it's a setup issue
     if (errorMessage.includes('relation') || errorMessage.includes('does not exist')) {
       return NextResponse.json(
-        { error: 'Database not configured. Please run the SQL setup from SUPABASE_SETUP.md in your Supabase dashboard.' },
+        { error: 'Database not configured. Load your schema into Neon and verify DATABASE_URL in .env.local.' },
         { status: 500 }
       );
     }

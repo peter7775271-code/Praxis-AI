@@ -642,7 +642,7 @@ const normalizeQuestionKey = (raw: string) => {
 
 const buildAutoGroupMapByQuestionId = (
   questions: Array<{ id: string; question_number: string | null }>,
-  context: { schoolName: string; year: number; paperNumber: number }
+  context: { schoolName: string; year: number; paperNumber: number; grade: string; subject: string }
 ) => {
   const groupedByBase = new Map<string, string[]>();
 
@@ -657,7 +657,15 @@ const buildAutoGroupMapByQuestionId = (
   const map: Record<string, string> = {};
   groupedByBase.forEach((ids, base) => {
     if (ids.length < 2) return;
-    const label = `Auto ${context.schoolName} ${context.year} P${context.paperNumber} Q${base}`;
+    const label = [
+      'paper-group',
+      context.year,
+      context.grade,
+      context.subject,
+      context.schoolName,
+      `paper-${context.paperNumber}`,
+      `q${base}`,
+    ].join('::');
     ids.forEach((id) => {
       map[id] = label;
     });
@@ -1468,10 +1476,11 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
     const combinedModelOutput = [fromChunks, fromImages].filter(Boolean).join('\n\n') || null;
 
     let autoGroupsByQuestionId: Record<string, string> = {};
+    let updatedQuestions: Array<{ id: string; group_id: string | null }> = [];
     if (autoGroupSubparts) {
       const { data: paperQuestions, error: paperQuestionsError } = await supabaseAdmin
         .from('hsc_questions')
-        .select('id, question_number')
+        .select('id, question_number, group_id')
         .match({
           grade,
           year,
@@ -1488,7 +1497,61 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
           schoolName: schoolNameForDb,
           year,
           paperNumber,
+          grade,
+          subject,
         });
+
+        const idsByGroupId = new Map<string, string[]>();
+        Object.entries(autoGroupsByQuestionId).forEach(([questionId, groupId]) => {
+          const existing = idsByGroupId.get(groupId) || [];
+          existing.push(questionId);
+          idsByGroupId.set(groupId, existing);
+        });
+
+        for (const [groupId, questionIds] of idsByGroupId.entries()) {
+          const update = await supabaseAdmin
+            .from('hsc_questions')
+            .update({ group_id: groupId })
+            .in('id', questionIds);
+
+          if (update.error) {
+            console.error('Auto-group update error:', update.error);
+          }
+        }
+
+        const clearIds = rows
+          .filter((question: any) => !autoGroupsByQuestionId[question.id] && String(question.group_id || '').trim())
+          .map((question: any) => question.id);
+
+        if (clearIds.length > 0) {
+          const clear = await supabaseAdmin
+            .from('hsc_questions')
+            .update({ group_id: null })
+            .in('id', clearIds);
+
+          if (clear.error) {
+            console.error('Auto-group clear error:', clear.error);
+          }
+        }
+
+        const { data: refreshedQuestions, error: refreshedQuestionsError } = await supabaseAdmin
+          .from('hsc_questions')
+          .select('id, group_id')
+          .match({
+            grade,
+            year,
+            subject,
+            school_name: schoolNameForDb,
+            paper_number: paperNumber,
+          });
+
+        if (refreshedQuestionsError) {
+          console.error('Auto-group refresh error:', refreshedQuestionsError);
+        } else {
+          updatedQuestions = Array.isArray(refreshedQuestions)
+            ? refreshedQuestions as Array<{ id: string; group_id: string | null }>
+            : [];
+        }
       }
     }
 
@@ -1516,6 +1579,7 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
       chunks: chunkResponses,
       refusals,
       autoGroupsByQuestionId,
+      updatedQuestions,
       chatgpt: combinedModelOutput,
       modelOutput: combinedModelOutput,
       rawInputs,
