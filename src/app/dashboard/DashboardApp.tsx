@@ -83,6 +83,10 @@ import type {
   TopicStat,
 } from './types';
 import { ComboboxDemo } from '@/components/ui/demo';
+import {
+  InteractiveLogsTable,
+  type UploadLog,
+} from '@/components/ui/interactive-logs-table-shadcnui';
 import type {
   Filter as ManageQuestionChipFilter,
   FilterConfig as ManageQuestionFilterConfig,
@@ -346,8 +350,11 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
   // Dev mode state
   const [isDevMode, setIsDevMode] = useState(false);
-  const [devTab, setDevTab] = useState<'add' | 'manage' | 'review'>('add');
+  const [devTab, setDevTab] = useState<'add' | 'manage' | 'review' | 'logs'>('add');
   const [allQuestions, setAllQuestions] = useState<any[]>([]);
+  const [uploadLogs, setUploadLogs] = useState<UploadLog[]>([]);
+  const [uploadLogsLoading, setUploadLogsLoading] = useState(false);
+  const [uploadLogsError, setUploadLogsError] = useState<string | null>(null);
   const [browseQuestions, setBrowseQuestions] = useState<any[]>([]);
   const [browseQuestionsSubject, setBrowseQuestionsSubject] = useState<string>('');
   const [browseLoadingQuestions, setBrowseLoadingQuestions] = useState(false);
@@ -1614,6 +1621,12 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       fetchAllQuestions({ includeIncomplete: true });
     }
   }, [viewMode, devTab]);
+
+  useEffect(() => {
+    if (viewMode === 'dev-questions' && devTab === 'logs' && isDevMode) {
+      void fetchUploadLogs();
+    }
+  }, [viewMode, devTab, isDevMode]);
 
   useEffect(() => {
     if (viewMode === 'dev-questions' && devTab === 'manage') {
@@ -2887,6 +2900,35 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       }
     } finally {
       setLoadingQuestions(false);
+    }
+  };
+
+  const fetchUploadLogs = async () => {
+    try {
+      setUploadLogsLoading(true);
+      setUploadLogsError(null);
+      const response = await fetch('/api/hsc/upload-logs');
+      const data = await response.json().catch(() => ({}));
+
+      if (response.ok) {
+        setUploadLogs(Array.isArray(data) ? data : []);
+      } else {
+        const msg = data?.details ?? data?.error ?? `Failed to fetch upload logs (${response.status})`;
+        setUploadLogsError(msg);
+        setUploadLogs([]);
+        console.error('[fetchUploadLogs]', msg);
+      }
+    } catch (err) {
+      const msg = getFetchErrorMessage(err, 'Failed to fetch upload logs');
+      setUploadLogsError(msg);
+      setUploadLogs([]);
+      if (isExpectedFetchError(err)) {
+        console.warn('[fetchUploadLogs]', msg);
+      } else {
+        console.error('Error fetching upload logs:', err);
+      }
+    } finally {
+      setUploadLogsLoading(false);
     }
   };
 
@@ -7389,6 +7431,36 @@ POINT_1 ...`}
               {/* Dev Mode - Question Management Page */}
               {viewMode === 'dev-questions' && (
                 <div className="flex-1 flex flex-col">
+                  {!isDevMode ? (
+                    <div className="flex flex-1 items-center justify-center p-8">
+                      <div
+                        className="max-w-lg rounded-3xl border p-8 text-center"
+                        style={{
+                          backgroundColor: 'var(--clr-surface-a0)',
+                          borderColor: 'var(--clr-surface-tonal-a20)',
+                        }}
+                      >
+                        <h1 className="text-3xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>
+                          Developer Tools
+                        </h1>
+                        <p className="mt-4 text-sm leading-6" style={{ color: 'var(--clr-surface-a50)' }}>
+                          This area is restricted to the developer account and includes question management and upload logs.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setViewMode('browse');
+                            router.push('/dashboard/browse');
+                          }}
+                          className="mt-6 rounded-lg px-4 py-2 font-medium cursor-pointer"
+                          style={{ backgroundColor: 'var(--clr-primary-a0)', color: 'var(--clr-dark-a0)' }}
+                        >
+                          Return to Browse
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
                   <div className="flex items-center justify-between p-6 border-b" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
                     <h1 className="text-3xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>Developer Tools</h1>
                     <button
@@ -7434,6 +7506,17 @@ POINT_1 ...`}
                       }}
                     >
                       Review solutions
+                    </button>
+                    <button
+                      onClick={() => setDevTab('logs')}
+                      className="px-4 py-2 rounded-lg font-medium transition cursor-pointer"
+                      style={{
+                        backgroundColor: devTab === 'logs' ? 'var(--clr-primary-a0)' : 'transparent',
+                        color: devTab === 'logs' ? 'var(--clr-dark-a0)' : 'var(--clr-surface-a40)',
+                        borderBottom: devTab === 'logs' ? `2px solid var(--clr-primary-a0)` : 'none',
+                      }}
+                    >
+                      Upload Logs ({uploadLogs.length})
                     </button>
                   </div>
 
@@ -8962,7 +9045,49 @@ POINT_1 ...`}
                         )}
                       </div>
                     )}
+
+                    {devTab === 'logs' && (
+                      <div className="mx-auto w-full max-w-7xl space-y-4">
+                        <p className="text-sm" style={{ color: 'var(--clr-surface-a50)' }}>
+                          Developer-only history of uploaded HSC questions, including when each question was added to the database.
+                        </p>
+
+                        {uploadLogsError && (
+                          <div
+                            className="rounded-2xl border px-4 py-3 text-sm"
+                            style={{
+                              backgroundColor: 'rgba(185, 28, 28, 0.06)',
+                              borderColor: 'rgba(185, 28, 28, 0.18)',
+                              color: 'var(--clr-danger-a0)',
+                            }}
+                          >
+                            {uploadLogsError}
+                          </div>
+                        )}
+
+                        {uploadLogsLoading ? (
+                          <div
+                            className="rounded-3xl border p-10 text-center text-sm"
+                            style={{
+                              backgroundColor: 'var(--clr-surface-a0)',
+                              borderColor: 'var(--clr-surface-tonal-a20)',
+                              color: 'var(--clr-surface-a50)',
+                            }}
+                          >
+                            Loading upload logs...
+                          </div>
+                        ) : (
+                          <InteractiveLogsTable
+                            logs={uploadLogs}
+                            title="Question Upload History"
+                            description="Search and filter every uploaded question by subject, upload source, and status. Expand a row to inspect the full question text and metadata."
+                          />
+                        )}
+                      </div>
+                    )}
                   </div>
+                    </>
+                  )}
                 </div>
               )}
 
