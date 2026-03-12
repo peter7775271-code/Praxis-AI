@@ -6105,13 +6105,17 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                         className="text-lg"
                         style={{ color: 'var(--clr-surface-a40)' }}
                       >
-                        {savedAttempts.length === 0 ? 'No saves yet' : (
-                          <>
-                            <span className="font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>{savedAttempts.filter(a => a.type === 'exam').length}</span> exam{savedAttempts.filter(a => a.type === 'exam').length !== 1 ? 's' : ''}
-                            {' '}&amp;{' '}
-                            <span className="font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>{savedAttempts.filter(a => a.type !== 'exam').length}</span> question{savedAttempts.filter(a => a.type !== 'exam').length !== 1 ? 's' : ''} saved
-                          </>
-                        )}
+                        {savedAttempts.length === 0 ? 'No saves yet' : (() => {
+                          const examCount = savedAttempts.filter(a => a.type === 'exam').length;
+                          const questionCount = savedAttempts.length - examCount;
+                          return (
+                            <>
+                              <span className="font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>{examCount}</span> exam{examCount !== 1 ? 's' : ''}
+                              {' '}&amp;{' '}
+                              <span className="font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>{questionCount}</span> question{questionCount !== 1 ? 's' : ''} saved
+                            </>
+                          );
+                        })()}
                       </p>
                     </div>
                     <button
@@ -6435,7 +6439,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                               </button>
                               {savedQuestionsListExpanded && (
                                 <div className="border-t" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
-                                  <ul className="divide-y" style={{ '--tw-divide-opacity': 1 } as React.CSSProperties}>
+                                  <ul className="divide-y divide-neutral-100">
                                     {(selectedAttempt.examAttempts || []).map((a: any, i: number) => {
                                       const score = a.feedback && typeof a.feedback.score === 'number' ? a.feedback.score : null;
                                       const maxMarks = a.question?.marks ?? 0;
@@ -6760,7 +6764,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                                         )}
                                       </div>
                                       <h3 className="font-bold text-base leading-tight truncate" style={{ color: 'var(--clr-primary-a50)' }}>
-                                        {isExam ? `${attempt.paperYear || ''} ${attempt.paperSubject || ''}`.trim() : attempt.subject}
+                                        {isExam ? [attempt.paperYear, attempt.paperSubject].filter(Boolean).join(' ') : attempt.subject}
                                       </h3>
                                       <p className="text-xs mt-0.5" style={{ color: 'var(--clr-surface-a40)' }}>
                                         {isExam ? attempt.paperGrade : attempt.topic}
