@@ -1,79 +1,136 @@
-# User Authentication Web App
+# Praxis AI — HSC Maths Question Database
 
-A beginner-friendly full-stack web application built with Next.js, TypeScript, Tailwind CSS, and SQLite. Users can create accounts, log in, and view their dashboard.
+A full-stack web app for HSC students to practise maths with a large bank of exam-style questions. Built with Next.js, TypeScript, Tailwind CSS, and Supabase.
+
+## What It Does
+
+Praxis AI lets you pull up HSC-style maths questions, filter them by grade, year, subject, and topic, write your working on a drawing canvas, and get AI-powered step-by-step help when you're stuck. There's also an exam builder, syllabus browser, analytics, and PDF export.
 
 ## Features
 
-- ✅ User sign-up with validation
-- ✅ Secure login with JWT authentication
-- ✅ Password hashing with bcrypt
-- ✅ SQLite database for user storage
-- ✅ Protected dashboard page
-- ✅ Beautiful UI with Tailwind CSS
-- ✅ Fully responsive design
-- ✅ Progressive Web App (installable + offline fallback)
+- 📚 **Question bank** — large archive of HSC-style maths questions with LaTeX rendering
+- 🔍 **Filters** — narrow questions by grade (Year 9–12), exam year, subject (Advanced / Extension 1 / Extension 2), and topic
+- 🏗️ **Exam builder** — assemble a custom practice paper from the question bank and export it as a PDF
+- ✏️ **Drawing canvas** — freehand working-out area built into every question (supports touch)
+- 🤖 **AI tutor** — stuck on a question? Get a step-by-step breakdown powered by OpenAI
+- 📊 **Analytics** — track your attempts and see which topics need more work
+- 🗂️ **Syllabus browser** — browse questions mapped to NSW curriculum dot points
+- 💾 **Saved attempts** — your answers are saved against your account
+- 🔐 **Authentication** — email/password sign-up with email verification and password reset
+- 📱 **PWA** — installable as a Progressive Web App with offline fallback
 
 ## Tech Stack
 
-- **Frontend**: Next.js 15+ with React 19+
-- **Backend**: Next.js API Routes
-- **Database**: SQLite with better-sqlite3
-- **Authentication**: JWT + bcryptjs
-- **Styling**: Tailwind CSS
-- **Language**: TypeScript
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 16+ / React 19+ |
+| Language | TypeScript |
+| Styling | Tailwind CSS |
+| Database | Supabase (PostgreSQL) |
+| Auth | JWT + bcryptjs + Supabase |
+| AI | OpenAI API |
+| Maths rendering | LaTeX via KaTeX |
+| Drawing | Canvas API, Excalidraw, lazy-brush |
+| PDF | Puppeteer |
+| PWA | @ducanh2912/next-pwa |
 
 ## Getting Started
 
-First, run the development server:
+### 1. Prerequisites
+
+- Node.js 18+
+- A [Supabase](https://supabase.com) project
+- An [OpenAI](https://platform.openai.com) API key
+
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Set up environment variables
+
+Create a `.env.local` file in the project root:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+OPENAI_API_KEY=your-openai-key
+
+# Email (for sign-up verification + password reset)
+EMAIL_USER=your-gmail@gmail.com
+EMAIL_PASS=your-gmail-app-password
+```
+
+### 4. Set up the database
+
+Run the SQL from `HSC_QUESTIONS_DATABASE_SETUP.md` in your Supabase SQL Editor to create the `hsc_questions` and `student_saved_attempts` tables.
+
+Then seed the question bank:
+
+```bash
+node scripts/populate-hsc-questions.js
+```
+
+### 5. Run the dev server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-## PWA Setup & Testing
+## Project Structure
 
-This app is configured as a Progressive Web App using `@ducanh2912/next-pwa`.
+```
+src/app/
+├── page.tsx                  # Landing page
+├── dashboard/                # Main app shell + question browser
+│   ├── browse/               # Browse & filter questions
+│   ├── builder/              # Custom exam builder
+│   ├── analytics/            # Progress analytics
+│   ├── history/              # Saved attempts
+│   ├── syllabus/             # Syllabus dot-point browser
+│   └── papers/               # Exported papers
+└── api/
+    ├── hsc/
+    │   ├── questions/        # GET random/filtered question
+    │   ├── attempts/         # GET/POST student attempts
+    │   ├── question-count/   # Live question count
+    │   └── mark/             # AI marking endpoint
+    └── auth/                 # Sign-up, login, verify, reset
 
-- App manifest is generated from `src/app/manifest.ts`
-- Service worker is generated at build time
-- Offline fallback page is available at `/~offline`
+scripts/
+└── populate-hsc-questions.js # Seed script for sample questions
+```
 
-To test PWA behavior locally, run the app in production mode:
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/hsc/questions` | Fetch a random question (accepts `grade`, `year`, `subject`, `topic` query params) |
+| GET | `/api/hsc/question-count` | Total number of questions in the database |
+| GET | `/api/hsc/attempts` | Get saved attempts for a user |
+| POST | `/api/hsc/attempts` | Save a new student attempt |
+| POST | `/api/hsc/mark` | AI-powered marking of a submitted answer |
+
+## Building for Production
 
 ```bash
 npm run build
 npm run start
 ```
 
-Then open Chrome DevTools → Application to verify:
+To verify the PWA, open Chrome DevTools → Application after running the production build.
 
-- Manifest is detected
-- Service worker is active
-- Install prompt is available (when criteria are met)
+## Environment Variables Reference
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Variable | Where to find it |
+|----------|-----------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Settings → API → Project URL |
+| `SUPABASE_ANON_KEY` | Supabase → Settings → API → anon public |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → service_role secret |
+| `OPENAI_API_KEY` | platform.openai.com → API keys |
+| `EMAIL_USER` | Your Gmail address |
+| `EMAIL_PASS` | Gmail App Password (requires 2FA) |

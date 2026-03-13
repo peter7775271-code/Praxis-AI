@@ -1,218 +1,363 @@
-'use client';
+"use client";
 
-import { AnimatePresence, motion } from 'framer-motion';
-import { Check, ChevronDown, Filter, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { AnimatePresence, motion } from "framer-motion";
+import { Check, ChevronDown, Filter, Flag, Search, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
-export type UploadLogLevel = 'manual' | 'pdf-ingest';
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-export interface UploadLog {
+type QuestionType = "written" | "multiple_choice" | "unknown";
+type ReviewFlag = "needs_images" | "needs_review" | null;
+
+const IS_DEVELOPER = process.env.NEXT_PUBLIC_IS_DEVELOPER === "true";
+
+interface QuestionLog {
   id: string;
-  uploadedAt: string;
-  level: UploadLogLevel;
+  timestamp: string;
+  questionType: QuestionType;
   subject: string;
-  questionText: string;
-  duration?: string;
-  status: string;
-  tags: string[];
+  topic: string;
   grade: string;
   year: number;
-  topic: string;
-  questionNumber?: string | null;
-  schoolName?: string | null;
-  marks?: number | null;
-  paperNumber?: number | null;
+  marks: number;
+  questionNumber: string | null;
+  schoolName: string | null;
+  paperLabel: string | null;
+  paperNumber: number;
+  reviewFlag: ReviewFlag;
+}
+
+interface ExamGroup {
+  key: string;
+  schoolName: string | null;
+  year: number;
+  subject: string;
+  grade: string;
+  paperLabel: string | null;
+  paperNumber: number;
+  questions: QuestionLog[];
+  reviewFlag: ReviewFlag;
+}
+
+interface DayBlock {
+  date: string;
+  formattedDate: string;
+  exams: ExamGroup[];
+  totalQuestions: number;
 }
 
 type Filters = {
-  level: string[];
   subject: string[];
-  status: string[];
+  grade: string[];
 };
 
-const levelStyles: Record<UploadLogLevel, string> = {
-  manual: 'bg-blue-500/10 text-blue-700',
-  'pdf-ingest': 'bg-amber-500/10 text-amber-700',
+// ---------------------------------------------------------------------------
+// Constants & helpers
+// ---------------------------------------------------------------------------
+
+const FLAG_LABEL: Record<NonNullable<ReviewFlag>, string> = {
+  needs_images: "Needs Images",
+  needs_review: "Needs Review",
 };
 
-const statusStyles: Record<string, string> = {
-  uploaded: 'text-green-700',
+const FLAG_STYLE: Record<NonNullable<ReviewFlag>, string> = {
+  needs_images:
+    "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-300/40",
+  needs_review:
+    "bg-red-500/10 text-red-600 dark:text-red-400 border-red-300/40",
 };
 
-function formatUploadTime(timestamp: string) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return timestamp;
-  return date.toLocaleString('en-AU', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+const questionTypeLabel: Record<QuestionType, string> = {
+  written: "Written",
+  multiple_choice: "MCQ",
+  unknown: "Unknown",
+};
+
+function toDateKey(isoString: string): string {
+  return isoString.slice(0, 10);
+}
+
+function formatDateKey(dateStr: string): string {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("en-AU", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
   });
 }
 
-function summarizeQuestion(log: UploadLog) {
-  const prefix = log.questionNumber ? `Q${log.questionNumber} • ` : '';
-  return `${prefix}${log.questionText}`;
+function groupIntoDayBlocks(logs: QuestionLog[]): DayBlock[] {
+  const dayMap = new Map<string, Map<string, ExamGroup>>();
+
+  for (const log of logs) {
+    const date = toDateKey(log.timestamp);
+    if (!dayMap.has(date)) dayMap.set(date, new Map());
+
+    const examMap = dayMap.get(date)!;
+    const examKey = [
+      log.schoolName ?? "__none__",
+      String(log.year),
+      log.subject,
+      String(log.paperNumber),
+    ].join("|");
+
+    if (!examMap.has(examKey)) {
+      examMap.set(examKey, {
+        key: examKey,
+        schoolName: log.schoolName,
+        year: log.year,
+        subject: log.subject,
+        grade: log.grade,
+        paperLabel: log.paperLabel,
+        paperNumber: log.paperNumber,
+        questions: [],
+        reviewFlag: log.reviewFlag,
+      });
+    }
+
+    const group = examMap.get(examKey)!;
+    group.questions.push(log);
+    // needs_review takes priority over needs_images
+    if (log.reviewFlag) {
+      if (
+        !group.reviewFlag ||
+        (log.reviewFlag === "needs_review" && group.reviewFlag === "needs_images")
+      ) {
+        group.reviewFlag = log.reviewFlag;
+      }
+    }
+  }
+
+  return Array.from(dayMap.keys())
+    .sort()
+    .reverse()
+    .map((date) => {
+      const exams = Array.from(dayMap.get(date)!.values());
+      return {
+        date,
+        formattedDate: formatDateKey(date),
+        exams,
+        totalQuestions: exams.reduce((s, e) => s + e.questions.length, 0),
+      };
+    });
 }
 
-function LogRow({
-  log,
-  expanded,
-  onToggle,
+// ---------------------------------------------------------------------------
+// ExamRow
+// ---------------------------------------------------------------------------
+
+function ExamRow({
+  exam,
+  onFlagChange,
 }: {
-  log: UploadLog;
-  expanded: boolean;
-  onToggle: () => void;
+  exam: ExamGroup;
+  onFlagChange: (exam: ExamGroup, flag: ReviewFlag) => Promise<void>;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [flagging, setFlagging] = useState(false);
+
+  const handleFlag = async (flag: ReviewFlag) => {
+    setFlagging(true);
+    try {
+      await onFlagChange(exam, flag);
+    } finally {
+      setFlagging(false);
+    }
+  };
+
+  const examMeta = [
+    exam.schoolName ?? "Unknown School",
+    exam.paperLabel ?? (exam.paperNumber > 1 ? `Paper ${exam.paperNumber}` : null),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <>
-      <motion.button
-        type="button"
-        onClick={onToggle}
-        className="w-full p-4 text-left transition-colors hover:bg-muted/50 active:bg-muted/70"
-        whileHover={{ backgroundColor: 'rgba(0,0,0,0.02)' }}
+    <div className="border border-border rounded-lg overflow-hidden">
+      {/* Exam header row */}
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full px-4 py-3 text-left bg-card hover:bg-muted/30 transition-colors"
       >
-        <div className="hidden items-center gap-4 md:flex">
-          <motion.div
+        <div className="flex items-center gap-3 flex-wrap">
+          <motion.span
             animate={{ rotate: expanded ? 180 : 0 }}
             transition={{ duration: 0.2 }}
             className="flex-shrink-0"
           >
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
-          </motion.div>
+          </motion.span>
 
-          <Badge
-            variant="secondary"
-            className={`flex-shrink-0 capitalize ${levelStyles[log.level]}`}
-          >
-            {log.level === 'pdf-ingest' ? 'PDF ingest' : 'Manual'}
+          <span className="font-medium text-sm text-foreground">
+            {exam.subject}
+          </span>
+
+          {examMeta && (
+            <span className="text-sm text-muted-foreground">{examMeta}</span>
+          )}
+
+          <Badge variant="outline" className="text-xs font-mono">
+            {exam.year}
           </Badge>
 
-          <time className="w-40 flex-shrink-0 font-mono text-xs text-muted-foreground">
-            {formatUploadTime(log.uploadedAt)}
-          </time>
+          <Badge variant="outline" className="text-xs">
+            {exam.grade}
+          </Badge>
 
-          <span className="min-w-[9rem] flex-shrink-0 text-sm font-medium text-foreground">
-            {log.subject}
+          <span className="text-xs text-muted-foreground ml-auto">
+            {exam.questions.length}{" "}
+            {exam.questions.length === 1 ? "question" : "questions"}
           </span>
 
-          <p className="flex-1 truncate text-sm text-muted-foreground">
-            {summarizeQuestion(log)}
-          </p>
-
-          <span
-            className={`flex-shrink-0 font-mono text-sm font-semibold ${
-              statusStyles[log.status] ?? 'text-muted-foreground'
-            }`}
-          >
-            {log.status}
-          </span>
-
-          <span className="w-16 flex-shrink-0 text-right font-mono text-xs text-muted-foreground">
-            {log.marks ? `${log.marks}m` : '--'}
-          </span>
-        </div>
-
-        <div className="space-y-3 md:hidden">
-          <div className="flex items-start gap-3">
-            <motion.div
-              animate={{ rotate: expanded ? 180 : 0 }}
-              transition={{ duration: 0.2 }}
-              className="mt-1 flex-shrink-0"
+          {exam.reviewFlag && (
+            <Badge
+              variant="outline"
+              className={`text-xs ${FLAG_STYLE[exam.reviewFlag]}`}
             >
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-            </motion.div>
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary" className={`capitalize ${levelStyles[log.level]}`}>
-                  {log.level === 'pdf-ingest' ? 'PDF ingest' : 'Manual'}
-                </Badge>
-                <Badge variant="outline">{log.subject}</Badge>
-              </div>
-              <p className="line-clamp-2 text-sm text-foreground">{summarizeQuestion(log)}</p>
-              <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                <time>{formatUploadTime(log.uploadedAt)}</time>
-                <span>{log.marks ? `${log.marks}m` : '--'}</span>
-              </div>
-            </div>
-          </div>
+              <Flag className="h-3 w-3 mr-1" />
+              {FLAG_LABEL[exam.reviewFlag]}
+            </Badge>
+          )}
         </div>
-      </motion.button>
+      </button>
 
+      {/* Developer flag controls */}
+      {IS_DEVELOPER && (
+        <div className="px-4 py-2 bg-muted/20 border-t border-dashed border-border flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Dev · Flag:
+          </span>
+          {(["needs_images", "needs_review"] as NonNullable<ReviewFlag>[]).map(
+            (f) => (
+              <button
+                key={f}
+                disabled={flagging}
+                onClick={() => handleFlag(exam.reviewFlag === f ? null : f)}
+                className={`px-2 py-0.5 rounded border text-xs transition-colors disabled:opacity-50 ${
+                  exam.reviewFlag === f
+                    ? FLAG_STYLE[f] + " font-semibold"
+                    : "border-border text-muted-foreground hover:bg-muted/50"
+                }`}
+              >
+                {FLAG_LABEL[f]}
+              </button>
+            )
+          )}
+          {exam.reviewFlag && (
+            <button
+              disabled={flagging}
+              onClick={() => handleFlag(null)}
+              className="px-2 py-0.5 rounded border border-border text-xs text-muted-foreground hover:bg-muted/50 flex items-center gap-1 disabled:opacity-50"
+            >
+              <X className="h-3 w-3" /> Clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Expandable question list */}
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
-            key="details"
+            key="exam-questions"
             initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
+            animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden border-t border-border bg-muted/50"
+            className="overflow-hidden"
           >
-            <div className="space-y-4 p-4">
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Question
-                </p>
-                <p className="rounded bg-background p-3 text-sm text-foreground">
-                  {log.questionText}
-                </p>
-              </div>
-
-              <div className="grid gap-4 text-sm md:grid-cols-2 xl:grid-cols-4">
-                <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Uploaded at
-                  </p>
-                  <p className="font-mono text-xs text-foreground">{formatUploadTime(log.uploadedAt)}</p>
+            <div className="divide-y divide-border border-t border-border">
+              {exam.questions.map((q) => (
+                <div
+                  key={q.id}
+                  className="px-4 py-2 flex items-center gap-3 text-sm bg-muted/10"
+                >
+                  <span className="font-mono text-xs text-muted-foreground w-8 flex-shrink-0">
+                    {q.questionNumber ?? "—"}
+                  </span>
+                  <Badge variant="secondary" className="text-xs flex-shrink-0">
+                    {questionTypeLabel[q.questionType]}
+                  </Badge>
+                  <span className="flex-1 truncate text-muted-foreground text-xs">
+                    {q.topic}
+                  </span>
+                  <span className="font-mono text-xs text-muted-foreground flex-shrink-0">
+                    {q.marks}m
+                  </span>
                 </div>
-                <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Topic
-                  </p>
-                  <p className="text-foreground">{log.topic}</p>
-                </div>
-                <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Grade / Year
-                  </p>
-                  <p className="text-foreground">{log.grade} • {log.year}</p>
-                </div>
-                <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    School / Paper
-                  </p>
-                  <p className="text-foreground">
-                    {log.schoolName || 'Unknown school'}
-                    {log.paperNumber ? ` • Paper ${log.paperNumber}` : ''}
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Tags
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {log.tags.map((tag) => (
-                    <Badge key={tag} variant="outline" className="text-xs">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
+              ))}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </>
+    </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// DayBlock
+// ---------------------------------------------------------------------------
+
+function DayBlockRow({
+  day,
+  onFlagChange,
+}: {
+  day: DayBlock;
+  onFlagChange: (exam: ExamGroup, flag: ReviewFlag) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div className="space-y-2">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-2 px-1 py-1 text-left"
+      >
+        <motion.span
+          animate={{ rotate: expanded ? 180 : 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        </motion.span>
+        <span className="text-sm font-semibold text-foreground">
+          {day.formattedDate}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {day.exams.length} {day.exams.length === 1 ? "exam" : "exams"} ·{" "}
+          {day.totalQuestions} questions
+        </span>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="day-exams"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden pl-6 space-y-2"
+          >
+            {day.exams.map((exam) => (
+              <ExamRow key={exam.key} exam={exam} onFlagChange={onFlagChange} />
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FilterPanel
+// ---------------------------------------------------------------------------
 
 function FilterPanel({
   filters,
@@ -221,33 +366,52 @@ function FilterPanel({
 }: {
   filters: Filters;
   onChange: (filters: Filters) => void;
-  logs: UploadLog[];
+  logs: QuestionLog[];
 }) {
-  const levels = Array.from(new Set(logs.map((log) => log.level)));
-  const subjects = Array.from(new Set(logs.map((log) => log.subject)));
-  const statuses = Array.from(new Set(logs.map((log) => log.status)));
+  const subjects = Array.from(new Set(logs.map((l) => l.subject))).sort();
+  const grades = Array.from(new Set(logs.map((l) => l.grade))).sort();
 
-  const toggleFilter = (category: keyof Filters, value: string) => {
+  const toggle = (category: keyof Filters, value: string) => {
     const current = filters[category];
-    const updated = current.includes(value)
-      ? current.filter((entry) => entry !== value)
-      : [...current, value];
-
     onChange({
       ...filters,
-      [category]: updated,
+      [category]: current.includes(value)
+        ? current.filter((v) => v !== value)
+        : [...current, value],
     });
   };
 
-  const clearAll = () => {
-    onChange({
-      level: [],
-      subject: [],
-      status: [],
-    });
-  };
+  const hasActive = Object.values(filters).some((g) => g.length > 0);
 
-  const hasActiveFilters = Object.values(filters).some((group) => group.length > 0);
+  const renderGroup = (label: string, items: string[], category: keyof Filters) => (
+    <div className="space-y-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <div className="space-y-2">
+        {items.map((item) => {
+          const sel = filters[category].includes(item);
+          return (
+            <motion.button
+              key={item}
+              type="button"
+              whileHover={{ x: 2 }}
+              onClick={() => toggle(category, item)}
+              aria-pressed={sel}
+              className={`flex w-full items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm transition-colors ${
+                sel
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40"
+              }`}
+            >
+              <span>{item}</span>
+              {sel && <Check className="h-3.5 w-3.5" />}
+            </motion.button>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   return (
     <motion.div
@@ -259,175 +423,227 @@ function FilterPanel({
     >
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">Filters</h3>
-        {hasActiveFilters && (
-          <Button variant="ghost" size="sm" onClick={clearAll} className="h-6 text-xs">
+        {hasActive && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange({ subject: [], grade: [] })}
+            className="h-6 text-xs"
+          >
             Clear
           </Button>
         )}
       </div>
-
-      <div className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Upload source
-        </p>
-        <div className="space-y-2">
-          {levels.map((level) => {
-            const selected = filters.level.includes(level);
-
-            return (
-              <motion.button
-                key={level}
-                type="button"
-                whileHover={{ x: 2 }}
-                onClick={() => toggleFilter('level', level)}
-                aria-pressed={selected}
-                className={`flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
-                  selected
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40'
-                }`}
-              >
-                <span className="capitalize">{level === 'pdf-ingest' ? 'PDF ingest' : level}</span>
-                {selected && <Check className="h-3.5 w-3.5" />}
-              </motion.button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Subject
-        </p>
-        <div className="space-y-2">
-          {subjects.map((subject) => {
-            const selected = filters.subject.includes(subject);
-
-            return (
-              <motion.button
-                key={subject}
-                type="button"
-                whileHover={{ x: 2 }}
-                onClick={() => toggleFilter('subject', subject)}
-                aria-pressed={selected}
-                className={`flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
-                  selected
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40'
-                }`}
-              >
-                <span>{subject}</span>
-                {selected && <Check className="h-3.5 w-3.5" />}
-              </motion.button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Status
-        </p>
-        <div className="space-y-2">
-          {statuses.map((status) => {
-            const selected = filters.status.includes(status);
-
-            return (
-              <motion.button
-                key={status}
-                type="button"
-                whileHover={{ x: 2 }}
-                onClick={() => toggleFilter('status', status)}
-                aria-pressed={selected}
-                className={`flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
-                  selected
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40'
-                }`}
-              >
-                <span>{status}</span>
-                {selected && <Check className="h-3.5 w-3.5" />}
-              </motion.button>
-            );
-          })}
-        </div>
-      </div>
+      {renderGroup("Subject", subjects, "subject")}
+      {renderGroup("Grade", grades, "grade")}
     </motion.div>
   );
 }
 
-export function InteractiveLogsTable({
-  logs,
-  title = 'Upload Logs',
-  description,
-}: {
-  logs: UploadLog[];
-  title?: string;
-  description?: string;
-}) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+const LIMIT_OPTIONS = [3, 7, 25, 50, 100] as const;
+type LimitOption = (typeof LIMIT_OPTIONS)[number] | "all";
+
+export function InteractiveLogsTable() {
+  const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  const [filters, setFilters] = useState<Filters>({
-    level: [],
-    subject: [],
-    status: [],
-  });
+  const [filters, setFilters] = useState<Filters>({ subject: [], grade: [] });
+  const [limit, setLimit] = useState<LimitOption>(3);
+  const [logs, setLogs] = useState<QuestionLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchLogs = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/hsc/all-questions");
+      if (!res.ok) throw new Error(`Failed to fetch: ${res.statusText}`);
+      const data = await res.json();
+      const questions: QuestionLog[] = (Array.isArray(data) ? data : [])
+        .filter((q: { created_at?: string }) => Boolean(q.created_at))
+        .map(
+          (q: {
+            id: string;
+            created_at?: string;
+            question_type?: string | null;
+            subject?: string;
+            topic?: string;
+            grade?: string;
+            year?: number;
+            marks?: number;
+            question_number?: string | null;
+            school_name?: string | null;
+            paper_label?: string | null;
+            paper_number?: number | null;
+            review_flag?: string | null;
+          }) => ({
+            id: String(q.id),
+            timestamp: q.created_at!,
+            questionType: (
+              q.question_type === "written" ||
+              q.question_type === "multiple_choice"
+                ? q.question_type
+                : "unknown"
+            ) as QuestionType,
+            subject: q.subject ?? "Unknown",
+            topic: q.topic ?? "Unknown",
+            grade: q.grade ?? "Unknown",
+            year: q.year ?? 0,
+            marks: q.marks ?? 0,
+            questionNumber: q.question_number ?? null,
+            schoolName: q.school_name ?? null,
+            paperLabel: q.paper_label ?? null,
+            paperNumber: q.paper_number ?? 1,
+            reviewFlag: (
+              q.review_flag === "needs_images" ||
+              q.review_flag === "needs_review"
+                ? q.review_flag
+                : null
+            ) as ReviewFlag,
+          })
+        );
+      setLogs(questions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load logs");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLogs();
+  }, [fetchLogs]);
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
-      const lowerQuery = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase();
       const matchSearch =
-        log.questionText.toLowerCase().includes(lowerQuery) ||
-        log.subject.toLowerCase().includes(lowerQuery) ||
-        log.topic.toLowerCase().includes(lowerQuery) ||
-        String(log.schoolName || '').toLowerCase().includes(lowerQuery) ||
-        String(log.questionNumber || '').toLowerCase().includes(lowerQuery);
-
-      const matchLevel = filters.level.length === 0 || filters.level.includes(log.level);
-      const matchSubject = filters.subject.length === 0 || filters.subject.includes(log.subject);
-      const matchStatus = filters.status.length === 0 || filters.status.includes(log.status);
-
-      return matchSearch && matchLevel && matchSubject && matchStatus;
+        !q ||
+        log.subject.toLowerCase().includes(q) ||
+        log.topic.toLowerCase().includes(q) ||
+        log.grade.toLowerCase().includes(q) ||
+        (log.schoolName ?? "").toLowerCase().includes(q);
+      const matchSubject =
+        filters.subject.length === 0 || filters.subject.includes(log.subject);
+      const matchGrade =
+        filters.grade.length === 0 || filters.grade.includes(log.grade);
+      return matchSearch && matchSubject && matchGrade;
     });
-  }, [filters, logs, searchQuery]);
+  }, [logs, searchQuery, filters]);
 
-  const activeFilters = filters.level.length + filters.subject.length + filters.status.length;
+  const dayBlocks = useMemo(
+    () => groupIntoDayBlocks(filteredLogs),
+    [filteredLogs]
+  );
+
+  const visibleDays = limit === "all" ? dayBlocks : dayBlocks.slice(0, limit);
+
+  const activeFilters = filters.subject.length + filters.grade.length;
+
+  const subtitle = loading
+    ? "Loading…"
+    : error
+    ? error
+    : `${dayBlocks.length} upload days · ${filteredLogs.length} questions${
+        limit !== "all" && dayBlocks.length > limit
+          ? ` (showing ${visibleDays.length} days)`
+          : ""
+      }`;
+
+  const handleFlagChange = useCallback(
+    async (exam: ExamGroup, flag: ReviewFlag) => {
+      // Optimistic UI update
+      setLogs((prev) =>
+        prev.map((log) =>
+          log.schoolName === exam.schoolName &&
+          log.year === exam.year &&
+          log.subject === exam.subject &&
+          log.paperNumber === exam.paperNumber
+            ? { ...log, reviewFlag: flag }
+            : log
+        )
+      );
+
+      try {
+        const res = await fetch("/api/hsc/flag-exam", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            schoolName: exam.schoolName,
+            year: exam.year,
+            subject: exam.subject,
+            paperNumber: exam.paperNumber,
+            flag,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(
+            (body as { error?: string }).error ?? "Failed to update flag"
+          );
+        }
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Failed to save flag");
+        fetchLogs();
+      }
+    },
+    [fetchLogs]
+  );
 
   return (
-    <main className="h-full min-h-[70vh] w-full overflow-hidden rounded-3xl border border-border bg-background">
+    <main className="h-full w-full bg-background">
       <div className="flex h-full flex-col">
+        {/* Header */}
         <div className="border-b border-border bg-card p-6">
           <div className="space-y-4">
             <div>
-              <h1 className="text-2xl font-semibold text-foreground">{title}</h1>
-              <p className="text-sm text-muted-foreground">
-                {filteredLogs.length} of {logs.length} uploaded questions
-              </p>
-              {description ? (
-                <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{description}</p>
-              ) : null}
+              <h1 className="text-2xl font-semibold text-foreground">
+                Upload Logs
+              </h1>
+              <p className="text-sm text-muted-foreground">{subtitle}</p>
             </div>
 
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search by question, subject, topic, school, or number..."
+                  placeholder="Search by subject, topic, grade or school…"
                   value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   className="h-9 pl-9 text-sm"
                 />
               </div>
+              <select
+                value={String(limit)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setLimit(
+                    val === "all" ? "all" : (Number(val) as LimitOption)
+                  );
+                }}
+                className="h-9 rounded-md border border-input bg-transparent px-2 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                aria-label="Days to show"
+              >
+                {LIMIT_OPTIONS.map((n) => (
+                  <option key={n} value={String(n)}>
+                    {n} days
+                  </option>
+                ))}
+                <option value="all">All days</option>
+              </select>
               <Button
-                variant={showFilters ? 'default' : 'outline'}
+                variant={showFilters ? "default" : "outline"}
                 size="sm"
-                onClick={() => setShowFilters((current) => !current)}
+                onClick={() => setShowFilters((v) => !v)}
                 className="relative"
               >
                 <Filter className="h-4 w-4" />
                 {activeFilters > 0 && (
-                  <Badge className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center bg-destructive p-0 text-xs text-destructive-foreground">
+                  <Badge className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center p-0 text-xs bg-destructive">
                     {activeFilters}
                   </Badge>
                 )}
@@ -436,7 +652,8 @@ export function InteractiveLogsTable({
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Body */}
+        <div className="flex flex-1 overflow-hidden">
           <AnimatePresence initial={false}>
             {showFilters && (
               <motion.div
@@ -447,42 +664,35 @@ export function InteractiveLogsTable({
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden border-r border-border"
               >
-                <FilterPanel filters={filters} onChange={setFilters} logs={logs} />
+                <FilterPanel
+                  filters={filters}
+                  onChange={setFilters}
+                  logs={logs}
+                />
               </motion.div>
             )}
           </AnimatePresence>
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <div className="divide-y divide-border">
-              <AnimatePresence mode="popLayout">
-                {filteredLogs.length > 0 ? (
-                  filteredLogs.map((log, index) => (
-                    <motion.div
-                      key={log.id}
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      transition={{ duration: 0.2, delay: index * 0.02 }}
-                    >
-                      <LogRow
-                        log={log}
-                        expanded={expandedId === log.id}
-                        onToggle={() => setExpandedId((current) => (current === log.id ? null : log.id))}
-                      />
-                    </motion.div>
-                  ))
-                ) : (
-                  <motion.div
-                    key="empty-state"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="p-12 text-center"
-                  >
-                    <p className="text-muted-foreground">No upload logs match your filters.</p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            {loading ? (
+              <p className="text-center text-muted-foreground py-12">
+                Loading upload logs…
+              </p>
+            ) : error ? (
+              <p className="text-center text-red-500 py-12">{error}</p>
+            ) : visibleDays.length === 0 ? (
+              <p className="text-center text-muted-foreground py-12">
+                No uploads match your filters.
+              </p>
+            ) : (
+              visibleDays.map((day) => (
+                <DayBlockRow
+                  key={day.date}
+                  day={day}
+                  onFlagChange={handleFlagChange}
+                />
+              ))
+            )}
           </div>
         </div>
       </div>

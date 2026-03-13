@@ -46,6 +46,14 @@ import {
   GraduationCap,
   FileText,
   Info,
+  ChevronDown,
+  ChevronUp,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Award,
+  Clock,
+  Hash,
+  ScrollText,
 } from 'lucide-react';
 import { getStroke } from 'perfect-freehand';
 import type {
@@ -83,10 +91,7 @@ import type {
   TopicStat,
 } from './types';
 import { ComboboxDemo } from '@/components/ui/demo';
-import {
-  InteractiveLogsTable,
-  type UploadLog,
-} from '@/components/ui/interactive-logs-table-shadcnui';
+// import { InteractiveLogsTable } from '@/components/ui/interactive-logs-table-shadcnui';
 import type {
   Filter as ManageQuestionChipFilter,
   FilterConfig as ManageQuestionFilterConfig,
@@ -334,6 +339,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [examReviewIndex, setExamReviewIndex] = useState(0);
   const [savedExamReviewMode, setSavedExamReviewMode] = useState(false);
   const [savedExamReviewIndex, setSavedExamReviewIndex] = useState(0);
+  const [savedQuestionsListExpanded, setSavedQuestionsListExpanded] = useState(false);
+  const [savedReviewSidebarCollapsed, setSavedReviewSidebarCollapsed] = useState(false);
   const [isInitializingExam, setIsInitializingExam] = useState(false);
   const [analyticsSummary, setAnalyticsSummary] = useState<string>('');
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -350,11 +357,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
   // Dev mode state
   const [isDevMode, setIsDevMode] = useState(false);
-  const [devTab, setDevTab] = useState<'add' | 'manage' | 'review' | 'logs'>('add');
+  const [devTab, setDevTab] = useState<'add' | 'manage' | 'review'>('add');
   const [allQuestions, setAllQuestions] = useState<any[]>([]);
-  const [uploadLogs, setUploadLogs] = useState<UploadLog[]>([]);
-  const [uploadLogsLoading, setUploadLogsLoading] = useState(false);
-  const [uploadLogsError, setUploadLogsError] = useState<string | null>(null);
   const [browseQuestions, setBrowseQuestions] = useState<any[]>([]);
   const [browseQuestionsSubject, setBrowseQuestionsSubject] = useState<string>('');
   const [browseLoadingQuestions, setBrowseLoadingQuestions] = useState(false);
@@ -1615,18 +1619,19 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   }, []);
 
+  // Auto-load questions when entering settings view (needed for exam dropdown in Syllabus Dot Point Mapping)
+  useEffect(() => {
+    if (viewMode === 'settings' && !allQuestions.length && !loadingQuestions) {
+      fetchAllQuestions({ includeIncomplete: true });
+    }
+  }, [viewMode]);
+
   // Fetch questions when entering review tab
   useEffect(() => {
     if (viewMode === 'dev-questions' && devTab === 'review') {
       fetchAllQuestions({ includeIncomplete: true });
     }
   }, [viewMode, devTab]);
-
-  useEffect(() => {
-    if (viewMode === 'dev-questions' && devTab === 'logs' && isDevMode) {
-      void fetchUploadLogs();
-    }
-  }, [viewMode, devTab, isDevMode]);
 
   useEffect(() => {
     if (viewMode === 'dev-questions' && devTab === 'manage') {
@@ -2900,35 +2905,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       }
     } finally {
       setLoadingQuestions(false);
-    }
-  };
-
-  const fetchUploadLogs = async () => {
-    try {
-      setUploadLogsLoading(true);
-      setUploadLogsError(null);
-      const response = await fetch('/api/hsc/upload-logs');
-      const data = await response.json().catch(() => ({}));
-
-      if (response.ok) {
-        setUploadLogs(Array.isArray(data) ? data : []);
-      } else {
-        const msg = data?.details ?? data?.error ?? `Failed to fetch upload logs (${response.status})`;
-        setUploadLogsError(msg);
-        setUploadLogs([]);
-        console.error('[fetchUploadLogs]', msg);
-      }
-    } catch (err) {
-      const msg = getFetchErrorMessage(err, 'Failed to fetch upload logs');
-      setUploadLogsError(msg);
-      setUploadLogs([]);
-      if (isExpectedFetchError(err)) {
-        console.warn('[fetchUploadLogs]', msg);
-      } else {
-        console.error('Error fetching upload logs:', err);
-      }
-    } finally {
-      setUploadLogsLoading(false);
     }
   };
 
@@ -4387,7 +4363,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
   }, [examRemainingMs]);
 
-  const viewModeLabel = viewMode === 'dashboard' ? 'Dashboard' : viewMode === 'analytics' ? 'Analytics Hub' : viewMode === 'browse' ? 'Browse Bank' : viewMode === 'builder' ? 'Exam Architect' : viewMode === 'formulas' ? 'Formula Vault' : viewMode === 'saved' ? 'Saved Content' : viewMode === 'history' ? 'My History' : viewMode === 'syllabus' ? 'Syllabus' : viewMode === 'papers' || viewMode === 'paper' ? 'Exam' : viewMode === 'settings' ? 'Settings' : viewMode === 'dev-questions' ? 'Dev Mode' : String(viewMode).replace(/-/g, ' ');
+  const viewModeLabel = viewMode === 'dashboard' ? 'Dashboard' : viewMode === 'analytics' ? 'Analytics Hub' : viewMode === 'browse' ? 'Browse Bank' : viewMode === 'builder' ? 'Exam Architect' : viewMode === 'formulas' ? 'Formula Vault' : viewMode === 'saved' ? 'Saved Content' : viewMode === 'history' ? 'My History' : viewMode === 'syllabus' ? 'Syllabus' : viewMode === 'papers' || viewMode === 'paper' ? 'Exam' : viewMode === 'settings' ? 'Settings' : viewMode === 'dev-questions' ? 'Dev Mode' : viewMode === 'logs' ? 'Upload Logs' : String(viewMode).replace(/-/g, ' ');
   const paperDisplayGroups = useMemo(() => {
     const groups: Array<{ startIndex: number; endIndex: number; label: string }> = [];
     if (!paperQuestions.length) return groups;
@@ -4536,6 +4512,12 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                 <button onClick={() => { setViewMode('dev-questions'); router.push('/dashboard/dev-questions'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 text-left cursor-pointer text-amber-700 bg-amber-50 hover:bg-amber-100 font-medium text-sm shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass}`}>
                   <FileText size={18} className="shrink-0" />
                   <span className={`text-sm whitespace-nowrap transition-all duration-200 ${sidebarTextTightClass}`}>Dev Mode ON</span>
+                </button>
+              )}
+              {isDevMode && (
+                <button onClick={() => { setViewMode('logs'); router.push('/dashboard/logs'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'logs' ? 'text-amber-800 bg-amber-100 font-semibold' : 'text-amber-700 bg-amber-50 hover:bg-amber-100 font-medium text-sm'}`}>
+                  <ScrollText size={18} className="shrink-0" />
+                  <span className={`text-sm whitespace-nowrap transition-all duration-200 ${sidebarTextTightClass}`}>Upload Logs</span>
                 </button>
               )}
               <button onClick={() => { setViewMode('settings'); router.push('/dashboard/settings'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'settings' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
@@ -6137,17 +6119,26 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                       <p
                         className="text-lg"
                         style={{ color: 'var(--clr-surface-a40)' }}
-                      >{savedAttempts.length} answer{savedAttempts.length !== 1 ? 's' : ''} saved</p>
+                      >
+                        {savedAttempts.length === 0 ? 'No saves yet' : (() => {
+                          const examCount = savedAttempts.filter(a => a.type === 'exam').length;
+                          const questionCount = savedAttempts.length - examCount;
+                          return (
+                            <>
+                              <span className="font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>{examCount}</span> exam{examCount !== 1 ? 's' : ''}
+                              {' '}&amp;{' '}
+                              <span className="font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>{questionCount}</span> question{questionCount !== 1 ? 's' : ''} saved
+                            </>
+                          );
+                        })()}
+                      </p>
                     </div>
                     <button
                       onClick={() => setViewMode('browse')}
-                      className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all cursor-pointer"
-                      style={{
-                        backgroundColor: 'var(--clr-primary-a0)',
-                        color: 'var(--clr-dark-a0)',
-                      }}
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all cursor-pointer border"
+                      style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
                     >
-                      <RefreshCw className="w-5 h-5" />
+                      <RefreshCw className="w-4 h-4" />
                       Browse exams
                     </button>
                   </div>
@@ -6156,17 +6147,17 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                     <>
                       <div className="flex items-center justify-between gap-3 mb-6">
                         <button
-                          onClick={() => { setSelectedAttempt(null); setSavedExamReviewMode(false); }}
-                          className="flex items-center gap-2 px-4 py-2 transition-colors cursor-pointer"
-                          style={{ color: 'var(--clr-surface-a40)' }}
+                          onClick={() => { setSelectedAttempt(null); setSavedExamReviewMode(false); setSavedQuestionsListExpanded(false); }}
+                          className="flex items-center gap-2 px-4 py-2 rounded-xl transition-colors cursor-pointer font-medium text-sm"
+                          style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-surface-a50)' }}
                         >
                           <ArrowLeft className="w-4 h-4" />
                           Back to list
                         </button>
                         <button
                           onClick={() => removeSavedAttempt(selectedAttempt.id)}
-                          className="text-sm font-medium cursor-pointer"
-                          style={{ color: 'var(--clr-danger-a10)' }}
+                          className="text-sm font-medium cursor-pointer px-4 py-2 rounded-lg transition-colors"
+                          style={{ color: 'var(--clr-surface-a50)' }}
                         >
                           Unsave
                         </button>
@@ -6175,35 +6166,92 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                       {selectedAttempt.type === 'exam' ? (
                         savedExamReviewMode && selectedAttempt.examAttempts?.length > 0 ? (
                           <div className="space-y-4">
-                            <button
-                              onClick={() => setSavedExamReviewMode(false)}
-                              className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium cursor-pointer"
-                              style={{ backgroundColor: 'var(--clr-surface-a10)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
-                            >
-                              <ArrowLeft className="w-4 h-4" />
-                              Back to Overview
-                            </button>
-                            <div className="flex gap-6">
-                              <aside className="w-52 flex-shrink-0 rounded-xl border p-3 space-y-1 overflow-y-auto max-h-[70vh]" style={{ backgroundColor: 'var(--clr-surface-a10)', borderColor: 'var(--clr-surface-tonal-a20)' }}>
-                                <p className="text-xs font-bold uppercase tracking-widest mb-2 px-2" style={{ color: 'var(--clr-surface-a40)' }}>Questions</p>
-                                {(selectedAttempt.examAttempts || []).map((_: any, i: number) => (
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => setSavedExamReviewMode(false)}
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium cursor-pointer transition-colors"
+                                style={{ backgroundColor: 'var(--clr-surface-a10)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
+                              >
+                                <ArrowLeft className="w-4 h-4" />
+                                Back to Overview
+                              </button>
+                              <span className="text-sm" style={{ color: 'var(--clr-surface-a40)' }}>
+                                Question {savedExamReviewIndex + 1} of {selectedAttempt.examAttempts?.length ?? 0}
+                              </span>
+                            </div>
+                            <div className="flex gap-4">
+                              {/* Collapsible Question Sidebar */}
+                              <aside
+                                className={`flex-shrink-0 rounded-xl border overflow-hidden transition-all duration-300 ${savedReviewSidebarCollapsed ? 'w-12' : 'w-52'}`}
+                                style={{ backgroundColor: 'var(--clr-surface-a10)', borderColor: 'var(--clr-surface-tonal-a20)', maxHeight: '70vh' }}
+                              >
+                                <div className="flex items-center justify-between p-2 border-b" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
+                                  {!savedReviewSidebarCollapsed && (
+                                    <p className="text-xs font-bold uppercase tracking-widest px-1" style={{ color: 'var(--clr-surface-a40)' }}>Questions</p>
+                                  )}
                                   <button
-                                    key={i}
-                                    onClick={() => setSavedExamReviewIndex(i)}
-                                    className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition cursor-pointer"
-                                    style={{
-                                      backgroundColor: savedExamReviewIndex === i ? 'var(--clr-primary-a0)' : 'transparent',
-                                      color: savedExamReviewIndex === i ? 'var(--clr-dark-a0)' : 'var(--clr-primary-a50)',
-                                    }}
+                                    onClick={() => setSavedReviewSidebarCollapsed(c => !c)}
+                                    className="p-1.5 rounded-lg cursor-pointer transition-colors hover:bg-neutral-200 ml-auto"
+                                    style={{ color: 'var(--clr-surface-a40)' }}
+                                    title={savedReviewSidebarCollapsed ? 'Expand question list' : 'Collapse question list'}
                                   >
-                                    Question {i + 1}
-                                    {selectedAttempt.examAttempts[i]?.feedback != null && (
-                                      <span className="ml-1 text-xs opacity-80">
-                                        ({typeof selectedAttempt.examAttempts[i].feedback?.score === 'number' ? selectedAttempt.examAttempts[i].feedback.score : '—'}/{selectedAttempt.examAttempts[i].question?.marks ?? 0})
-                                      </span>
-                                    )}
+                                    {savedReviewSidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
                                   </button>
-                                ))}
+                                </div>
+                                {!savedReviewSidebarCollapsed && (
+                                  <div className="p-2 space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(70vh - 40px)' }}>
+                                    {(selectedAttempt.examAttempts || []).map((_: any, i: number) => {
+                                      const score = typeof selectedAttempt.examAttempts[i].feedback?.score === 'number' ? selectedAttempt.examAttempts[i].feedback.score : null;
+                                      const maxMarks = selectedAttempt.examAttempts[i].question?.marks ?? 0;
+                                      const isCorrect = score !== null && score === maxMarks;
+                                      const isPartial = score !== null && score > 0 && score < maxMarks;
+                                      const isWrong = score !== null && score === 0;
+                                      return (
+                                        <button
+                                          key={i}
+                                          onClick={() => setSavedExamReviewIndex(i)}
+                                          className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition cursor-pointer"
+                                          style={{
+                                            backgroundColor: savedExamReviewIndex === i ? 'var(--clr-surface-tonal-a20)' : 'transparent',
+                                            color: 'var(--clr-primary-a50)',
+                                          }}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isCorrect ? 'bg-green-400' : isPartial ? 'bg-amber-400' : isWrong ? 'bg-red-400' : 'bg-neutral-300'}`} />
+                                            <span>Q{i + 1}</span>
+                                            {score !== null && (
+                                              <span className="ml-auto text-xs opacity-50">{score}/{maxMarks}</span>
+                                            )}
+                                          </div>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {savedReviewSidebarCollapsed && (
+                                  <div className="p-1 space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(70vh - 40px)' }}>
+                                    {(selectedAttempt.examAttempts || []).map((_: any, i: number) => {
+                                      const score = typeof selectedAttempt.examAttempts[i].feedback?.score === 'number' ? selectedAttempt.examAttempts[i].feedback.score : null;
+                                      const maxMarks = selectedAttempt.examAttempts[i].question?.marks ?? 0;
+                                      const isCorrect = score !== null && score === maxMarks;
+                                      const isPartial = score !== null && score > 0 && score < maxMarks;
+                                      const isWrong = score !== null && score === 0;
+                                      return (
+                                        <button
+                                          key={i}
+                                          onClick={() => setSavedExamReviewIndex(i)}
+                                          className="w-full flex items-center justify-center p-1.5 rounded-lg text-xs font-bold transition cursor-pointer"
+                                          style={{
+                                            backgroundColor: savedExamReviewIndex === i ? 'var(--clr-surface-tonal-a20)' : 'transparent',
+                                          }}
+                                          title={`Question ${i + 1}${score !== null ? ` — ${score}/${maxMarks}` : ''}`}
+                                        >
+                                          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isCorrect ? 'bg-green-100 text-green-700' : isPartial ? 'bg-amber-100 text-amber-700' : isWrong ? 'bg-red-100 text-red-700' : 'bg-neutral-100 text-neutral-600'}`}>{i + 1}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </aside>
                               <div className="flex-1 min-w-0">
                                 {(() => {
@@ -6330,9 +6378,10 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                                           </div>
                                         </div>
                                       )}
-                                      <div className="border-t p-6 flex gap-3" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
-                                        <button onClick={() => setSavedExamReviewIndex((i) => Math.max(0, i - 1))} disabled={savedExamReviewIndex === 0} className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer" style={{ backgroundColor: 'var(--clr-surface-a10)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}><ChevronLeft className="w-4 h-4" />Previous</button>
-                                        <button onClick={() => setSavedExamReviewIndex((i) => Math.min((selectedAttempt.examAttempts?.length ?? 1) - 1, i + 1))} disabled={savedExamReviewIndex >= (selectedAttempt.examAttempts?.length ?? 0) - 1} className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer" style={{ backgroundColor: 'var(--clr-primary-a0)', borderColor: 'var(--clr-primary-a0)', color: 'var(--clr-dark-a0)' }}>Next<ChevronRight className="w-4 h-4" /></button>
+                                      <div className="border-t p-6 flex items-center justify-between gap-3" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
+                                        <button onClick={() => setSavedExamReviewIndex((i) => Math.max(0, i - 1))} disabled={savedExamReviewIndex === 0} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}><ChevronLeft className="w-4 h-4" />Previous</button>
+                                        <span className="text-sm" style={{ color: 'var(--clr-surface-a40)' }}>{savedExamReviewIndex + 1} / {selectedAttempt.examAttempts?.length ?? 0}</span>
+                                        <button onClick={() => setSavedExamReviewIndex((i) => Math.min((selectedAttempt.examAttempts?.length ?? 1) - 1, i + 1))} disabled={savedExamReviewIndex >= (selectedAttempt.examAttempts?.length ?? 0) - 1} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}>Next<ChevronRight className="w-4 h-4" /></button>
                                       </div>
                                     </div>
                                   );
@@ -6342,34 +6391,95 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                           </div>
                         ) : (
                           <div className="space-y-6 rounded-2xl border p-6" style={{ backgroundColor: 'var(--clr-surface-a10)', borderColor: 'var(--clr-surface-tonal-a20)' }}>
-                            <h1 className="text-2xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>Saved Exam: {selectedAttempt.paperYear} {selectedAttempt.paperSubject}</h1>
+                            {/* Exam header */}
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-xs font-medium uppercase tracking-widest" style={{ color: 'var(--clr-surface-a40)' }}>Exam</span>
+                                  {selectedAttempt.paperGrade && <><span style={{ color: 'var(--clr-surface-a40)' }}>·</span><span className="text-xs font-medium" style={{ color: 'var(--clr-surface-a40)' }}>{selectedAttempt.paperGrade}</span></>}
+                                </div>
+                                <h1 className="text-2xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>{selectedAttempt.paperYear} {selectedAttempt.paperSubject}</h1>
+                                <p className="text-sm mt-1" style={{ color: 'var(--clr-surface-a40)' }}>
+                                  {selectedAttempt.examAttempts?.length ?? 0} question{(selectedAttempt.examAttempts?.length ?? 0) !== 1 ? 's' : ''}
+                                  {selectedAttempt.savedAt && <> &bull; Saved {new Date(selectedAttempt.savedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</>}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Stats */}
                             <div className="grid gap-4 sm:grid-cols-3">
                               <div className="rounded-xl border p-4" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)' }}>
-                                <div className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--clr-surface-a50)' }}>Total Score</div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <Award className="w-4 h-4" style={{ color: 'var(--clr-surface-a40)' }} />
+                                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--clr-surface-a40)' }}>Total Score</div>
+                                </div>
                                 <div className="text-2xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>{selectedAttempt.totalScore} / {selectedAttempt.totalPossible}</div>
                               </div>
                               <div className="rounded-xl border p-4" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)' }}>
-                                <div className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--clr-surface-a50)' }}>Percentage</div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <Target className="w-4 h-4" style={{ color: 'var(--clr-surface-a40)' }} />
+                                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--clr-surface-a40)' }}>Percentage</div>
+                                </div>
                                 <div className="text-2xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>{selectedAttempt.totalPossible > 0 ? Math.round((selectedAttempt.totalScore / selectedAttempt.totalPossible) * 100) : 0}%</div>
+                                <div className="mt-2 rounded-full overflow-hidden" style={{ height: 4, backgroundColor: 'var(--clr-surface-tonal-a20)' }}>
+                                  <div className="h-full rounded-full" style={{ width: `${selectedAttempt.totalPossible > 0 ? Math.round((selectedAttempt.totalScore / selectedAttempt.totalPossible) * 100) : 0}%`, backgroundColor: 'var(--clr-primary-a50)' }} />
+                                </div>
+                              </div>
+                              <div className="rounded-xl border p-4" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)' }}>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <Hash className="w-4 h-4" style={{ color: 'var(--clr-surface-a40)' }} />
+                                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--clr-surface-a40)' }}>Questions</div>
+                                </div>
+                                <div className="text-2xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>{selectedAttempt.examAttempts?.length ?? 0}</div>
                               </div>
                             </div>
-                            <div>
-                              <h3 className="text-sm font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--clr-surface-a40)' }}>Marks per question</h3>
-                              <ul className="space-y-2">
-                                {(selectedAttempt.examAttempts || []).map((a: any, i: number) => (
-                                  <li key={i} className="flex items-center justify-between rounded-lg border px-3 py-2" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)' }}>
-                                    <span style={{ color: 'var(--clr-primary-a50)' }}>Q{i + 1}</span>
-                                    <span style={{ color: 'var(--clr-primary-a50)' }}>{a.feedback ? (typeof a.feedback.score === 'number' ? a.feedback.score : '—') : '—'}</span>
-                                    <span style={{ color: 'var(--clr-surface-a40)' }}>/ {a.question?.marks ?? 0}</span>
-                                  </li>
-                                ))}
-                              </ul>
+
+                            {/* Toggleable marks per question */}
+                            <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
+                              <button
+                                type="button"
+                                onClick={() => setSavedQuestionsListExpanded(e => !e)}
+                                className="w-full flex items-center justify-between px-4 py-3 cursor-pointer transition-colors"
+                                style={{ backgroundColor: 'var(--clr-surface-a0)' }}
+                              >
+                                <span className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--clr-surface-a40)' }}>Marks per question</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs" style={{ color: 'var(--clr-surface-a50)' }}>{savedQuestionsListExpanded ? 'Hide' : `Show ${selectedAttempt.examAttempts?.length ?? 0} questions`}</span>
+                                  {savedQuestionsListExpanded ? <ChevronUp className="w-4 h-4" style={{ color: 'var(--clr-surface-a40)' }} /> : <ChevronDown className="w-4 h-4" style={{ color: 'var(--clr-surface-a40)' }} />}
+                                </div>
+                              </button>
+                              {savedQuestionsListExpanded && (
+                                <div className="border-t" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
+                                  <ul className="divide-y divide-neutral-100">
+                                    {(selectedAttempt.examAttempts || []).map((a: any, i: number) => {
+                                      const score = a.feedback && typeof a.feedback.score === 'number' ? a.feedback.score : null;
+                                      const maxMarks = a.question?.marks ?? 0;
+                                      const pct = score !== null && maxMarks > 0 ? Math.round((score / maxMarks) * 100) : null;
+                                      const isCorrect = score !== null && score === maxMarks;
+                                      const isPartial = score !== null && score > 0 && score < maxMarks;
+                                      const isWrong = score !== null && score === 0;
+                                      return (
+                                        <li key={i} className="flex items-center gap-3 px-4 py-2.5" style={{ backgroundColor: 'var(--clr-surface-a0)' }}>
+                                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${isCorrect ? 'bg-green-100 text-green-700' : isPartial ? 'bg-amber-100 text-amber-700' : isWrong ? 'bg-red-100 text-red-700' : 'bg-neutral-100 text-neutral-500'}`}>{i + 1}</span>
+                                          <span className="flex-1 text-sm truncate" style={{ color: 'var(--clr-primary-a50)' }}>{a.question?.question_text ? a.question.question_text.replace(/\$[^$]*\$/g, '[math]').substring(0, 60) + (a.question.question_text.length > 60 ? '…' : '') : `Question ${i + 1}`}</span>
+                                          <span className="text-sm font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>
+                                            {score !== null ? `${score}/${maxMarks}` : `—/${maxMarks}`}
+                                          </span>
+                                          {pct !== null && <span className="text-xs w-10 text-right" style={{ color: 'var(--clr-surface-a40)' }}>{pct}%</span>}
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                </div>
+                              )}
                             </div>
+
+                            {/* Action buttons */}
                             <div className="flex flex-wrap items-center gap-3">
                               <button
                                 onClick={() => openSavedExamAsPaper(selectedAttempt)}
-                                className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold cursor-pointer"
-                                style={{ backgroundColor: 'var(--clr-info-a0)', color: 'var(--clr-light-a0)' }}
+                                className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium border cursor-pointer transition-colors"
+                                style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
                               >
                                 <BookOpen className="w-5 h-5" />
                                 View as Paper
@@ -6377,27 +6487,27 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                               <button
                                 onClick={() => exportSavedExamPdf(false)}
                                 disabled={exportingSavedExamPdf !== null}
-                                className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                                style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-primary-a50)' }}
+                                className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
                               >
                                 <Download className="w-5 h-5" />
-                                {exportingSavedExamPdf === 'exam' ? 'Exporting Exam PDF…' : 'Export Exam PDF'}
+                                {exportingSavedExamPdf === 'exam' ? 'Exporting…' : 'Export PDF'}
                               </button>
                               <button
                                 onClick={() => exportSavedExamPdf(true)}
                                 disabled={exportingSavedExamPdf !== null}
-                                className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                                style={{ backgroundColor: 'var(--clr-btn-primary)', color: 'var(--clr-btn-primary-text)' }}
+                                className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
                               >
                                 <Download className="w-5 h-5" />
-                                {exportingSavedExamPdf === 'solutions' ? 'Exporting Solutions PDF…' : 'Export Exam + Solutions PDF'}
+                                {exportingSavedExamPdf === 'solutions' ? 'Exporting…' : 'Export + Solutions'}
                               </button>
                               <button
-                                onClick={() => { setSavedExamReviewMode(true); setSavedExamReviewIndex(0); }}
-                                className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold cursor-pointer"
-                                style={{ backgroundColor: 'var(--clr-primary-a0)', color: 'var(--clr-dark-a0)' }}
+                                onClick={() => { setSavedExamReviewMode(true); setSavedExamReviewIndex(0); setSavedReviewSidebarCollapsed(false); }}
+                                className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium border cursor-pointer transition-colors"
+                                style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
                               >
-                                <BookOpen className="w-5 h-5" />
+                                <Eye className="w-5 h-5" />
                                 Review Questions
                               </button>
                             </div>
@@ -6627,67 +6737,109 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                           >Submit and save an answer to see it here</p>
                         </div>
                       ) : (
-                        <div className="grid gap-4">
-                          {savedAttempts.map((attempt) => (
-                            <div
-                              key={attempt.id}
-                              className="border rounded-xl p-6 transition-colors space-y-3"
-                              style={{
-                                backgroundColor: 'var(--clr-surface-a10)',
-                                borderColor: 'var(--clr-surface-tonal-a20)',
-                              }}
-                            >
-                              <button
-                                onClick={() => { setSelectedAttempt(attempt); setSavedExamReviewMode(false); }}
-                                className="w-full text-left cursor-pointer"
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          {savedAttempts.map((attempt) => {
+                            const isExam = attempt.type === 'exam';
+                            const pct = isExam && attempt.totalPossible > 0 ? Math.round((attempt.totalScore / attempt.totalPossible) * 100) : null;
+                            const savedDate = attempt.savedAt ? new Date(attempt.savedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+                            return (
+                              <div
+                                key={attempt.id}
+                                className="border rounded-2xl overflow-hidden transition-shadow hover:shadow-md"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                }}
                               >
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1">
-                                    <h3 className="font-bold text-lg" style={{ color: 'var(--clr-primary-a50)' }}>
-                                      {attempt.type === 'exam' ? `${attempt.paperYear || ''} ${attempt.paperSubject || ''}` : attempt.subject}
-                                    </h3>
-                                    <p className="text-sm" style={{ color: 'var(--clr-surface-a40)' }}>
-                                      {attempt.type === 'exam' ? attempt.paperGrade : attempt.topic}
-                                    </p>
-                                  </div>
-                                  <div className="text-right flex-shrink-0 ml-4">
-                                    {attempt.type === 'exam' ? (
-                                      <>
-                                        <div className="text-2xl font-bold" style={{ color: 'var(--clr-success-a10)' }}>
-                                          {attempt.totalScore} / {attempt.totalPossible}
-                                        </div>
-                                        <div className="text-xs" style={{ color: 'var(--clr-surface-a50)' }}>Exam</div>
-                                      </>
-                                    ) : (
-                                      <div className="text-2xl font-bold" style={{ color: 'var(--clr-success-a10)' }}>{attempt.marks}m</div>
-                                    )}
-                                    <div className="text-xs" style={{ color: 'var(--clr-surface-a50)' }}>{new Date(attempt.savedAt).toLocaleDateString()}</div>
-                                  </div>
-                                </div>
-                                {attempt.type !== 'exam' && (
-                                  <>
-                                    <div className="pt-2 border-t mt-2" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
-                                      <p className="text-sm line-clamp-2" style={{ color: 'var(--clr-primary-a40)' }}>{attempt.questionText}</p>
+                                <button
+                                  onClick={() => { setSelectedAttempt(attempt); setSavedExamReviewMode(false); setSavedQuestionsListExpanded(false); }}
+                                  className="w-full text-left cursor-pointer p-5"
+                                >
+                                  {/* Card header */}
+                                  <div className="flex items-start justify-between gap-3 mb-3">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                                        <span
+                                          className="text-xs font-medium uppercase tracking-widest"
+                                          style={{ color: 'var(--clr-surface-a40)' }}
+                                        >
+                                          {isExam ? 'Exam' : 'Question'}{!isExam && attempt.questionType === 'multiple_choice' ? ' · MCQ' : ''}
+                                        </span>
+                                      </div>
+                                      <h3 className="font-semibold text-base leading-tight truncate" style={{ color: 'var(--clr-primary-a50)' }}>
+                                        {isExam ? [attempt.paperYear, attempt.paperSubject].filter(Boolean).join(' ') : attempt.subject}
+                                      </h3>
+                                      <p className="text-xs mt-0.5" style={{ color: 'var(--clr-surface-a40)' }}>
+                                        {isExam ? attempt.paperGrade : attempt.topic}
+                                      </p>
                                     </div>
-                                    {(attempt.feedback?.ai_evaluation || attempt.feedback?.mcq_explanation) && (
-                                      <div className="pt-2">
-                                        <p className="text-xs text-zinc-500 line-clamp-1">
+                                    {/* Score badge */}
+                                    <div className="flex-shrink-0 text-right">
+                                      {isExam ? (
+                                        <div>
+                                          <div className="text-xl font-bold leading-none" style={{ color: 'var(--clr-primary-a50)' }}>
+                                            {attempt.totalScore}<span className="text-sm font-medium" style={{ color: 'var(--clr-surface-a40)' }}>/{attempt.totalPossible}</span>
+                                          </div>
+                                          {pct !== null && <div className="text-xs font-semibold mt-0.5" style={{ color: 'var(--clr-surface-a40)' }}>{pct}%</div>}
+                                        </div>
+                                      ) : (
+                                        <div className="text-xl font-bold leading-none" style={{ color: 'var(--clr-primary-a50)' }}>
+                                          {attempt.marks}<span className="text-xs font-medium" style={{ color: 'var(--clr-surface-a40)' }}> marks</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Exam progress bar */}
+                                  {isExam && pct !== null && (
+                                    <div className="mb-3 rounded-full overflow-hidden" style={{ height: 4, backgroundColor: 'var(--clr-surface-tonal-a20)' }}>
+                                      <div
+                                        className="h-full rounded-full"
+                                        style={{ width: `${pct}%`, backgroundColor: 'var(--clr-primary-a50)' }}
+                                      />
+                                    </div>
+                                  )}
+
+                                  {/* Exam meta */}
+                                  {isExam && (
+                                    <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--clr-surface-a50)' }}>
+                                      <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{attempt.examAttempts?.length ?? 0} questions</span>
+                                      {savedDate && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{savedDate}</span>}
+                                    </div>
+                                  )}
+
+                                  {/* Question preview */}
+                                  {!isExam && (
+                                    <div className="border-t pt-2.5 mt-2.5 space-y-1.5" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
+                                      <p className="text-xs line-clamp-2" style={{ color: 'var(--clr-primary-a40)' }}>{attempt.questionText}</p>
+                                      {(attempt.feedback?.ai_evaluation || attempt.feedback?.mcq_explanation) && (
+                                        <p className="text-xs line-clamp-1" style={{ color: 'var(--clr-surface-a50)' }}>
                                           {stripOuterBraces(attempt.feedback.ai_evaluation || attempt.feedback.mcq_explanation || '').split('\n')[0]}
                                         </p>
+                                      )}
+                                      <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--clr-surface-a50)' }}>
+                                        {savedDate && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{savedDate}</span>}
+                                        {attempt.feedback?.score !== undefined && attempt.marks && (
+                                          <span className="flex items-center gap-1"><Award className="w-3 h-3" />{attempt.feedback.score}/{attempt.marks}m</span>
+                                        )}
                                       </div>
-                                    )}
-                                  </>
-                                )}
-                              </button>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); removeSavedAttempt(attempt.id); }}
-                                className="text-sm font-medium cursor-pointer"
-                                style={{ color: 'var(--clr-danger-a10)' }}
-                              >
-                                Unsave
-                              </button>
-                            </div>
-                          ))}
+                                    </div>
+                                  )}
+                                </button>
+
+                                {/* Unsave button at bottom */}
+                                <div className="px-5 pb-4">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); removeSavedAttempt(attempt.id); }}
+                                    className="text-xs font-semibold cursor-pointer px-3 py-1.5 rounded-lg transition-colors"
+                                    style={{ color: 'var(--clr-surface-a50)' }}
+                                  >
+                                    Unsave
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </>
@@ -6790,27 +6942,38 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                         <div className="space-y-4">
                           <div>
                             <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Exam</label>
-                            <select
-                              value={selectedSyllabusMappingPaper}
-                              onChange={(e) => setSelectedSyllabusMappingPaper(e.target.value)}
-                              disabled={isMappingSyllabusDotPoints || availablePapers.length === 0}
-                              className="mt-2 w-full px-4 py-2 rounded-lg border"
-                              style={{
-                                backgroundColor: 'var(--clr-surface-a0)',
-                                borderColor: 'var(--clr-surface-tonal-a20)',
-                                color: 'var(--clr-primary-a50)',
-                              }}
-                            >
-                              {availablePapers.length === 0 ? (
-                                <option value="">No exam papers available</option>
-                              ) : (
-                                availablePapers.map((paper) => (
-                                  <option key={getPaperKey(paper)} value={getPaperKey(paper)}>
-                                    {paper.year} • {paper.grade} • {paper.subject} • {paper.school} ({paper.count} questions)
-                                  </option>
-                                ))
-                              )}
-                            </select>
+                            <div className="mt-2 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 items-center">
+                              <select
+                                value={selectedSyllabusMappingPaper}
+                                onChange={(e) => setSelectedSyllabusMappingPaper(e.target.value)}
+                                disabled={isMappingSyllabusDotPoints || loadingQuestions || availablePapers.length === 0}
+                                className="w-full px-4 py-2 rounded-lg border"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                  color: 'var(--clr-primary-a50)',
+                                }}
+                              >
+                                {availablePapers.length === 0 ? (
+                                  <option value="">{loadingQuestions ? 'Loading exams…' : 'No exam papers loaded'}</option>
+                                ) : (
+                                  availablePapers.map((paper) => (
+                                    <option key={getPaperKey(paper)} value={getPaperKey(paper)}>
+                                      {paper.year} • {paper.grade} • {paper.subject} • {paper.school} ({paper.count} questions)
+                                    </option>
+                                  ))
+                                )}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => void fetchAllQuestions({ includeIncomplete: true })}
+                                disabled={loadingQuestions || isMappingSyllabusDotPoints}
+                                className="px-4 py-2 rounded-lg text-sm font-medium cursor-pointer disabled:opacity-50"
+                                style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-primary-a50)' }}
+                              >
+                                {loadingQuestions ? 'Loading…' : 'Load Exams'}
+                              </button>
+                            </div>
                           </div>
 
                           <div>
@@ -7428,39 +7591,16 @@ POINT_1 ...`}
                 </div>
               )}
 
+              {/* Dev Mode - Upload Logs Page */}
+              {viewMode === 'logs' && (
+                <div className="flex-1 flex flex-col h-full">
+                  <InteractiveLogsTable />
+                </div>
+              )}
+
               {/* Dev Mode - Question Management Page */}
               {viewMode === 'dev-questions' && (
                 <div className="flex-1 flex flex-col">
-                  {!isDevMode ? (
-                    <div className="flex flex-1 items-center justify-center p-8">
-                      <div
-                        className="max-w-lg rounded-3xl border p-8 text-center"
-                        style={{
-                          backgroundColor: 'var(--clr-surface-a0)',
-                          borderColor: 'var(--clr-surface-tonal-a20)',
-                        }}
-                      >
-                        <h1 className="text-3xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>
-                          Developer Tools
-                        </h1>
-                        <p className="mt-4 text-sm leading-6" style={{ color: 'var(--clr-surface-a50)' }}>
-                          This area is restricted to the developer account and includes question management and upload logs.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setViewMode('browse');
-                            router.push('/dashboard/browse');
-                          }}
-                          className="mt-6 rounded-lg px-4 py-2 font-medium cursor-pointer"
-                          style={{ backgroundColor: 'var(--clr-primary-a0)', color: 'var(--clr-dark-a0)' }}
-                        >
-                          Return to Browse
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
                   <div className="flex items-center justify-between p-6 border-b" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
                     <h1 className="text-3xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>Developer Tools</h1>
                     <button
@@ -7506,17 +7646,6 @@ POINT_1 ...`}
                       }}
                     >
                       Review solutions
-                    </button>
-                    <button
-                      onClick={() => setDevTab('logs')}
-                      className="px-4 py-2 rounded-lg font-medium transition cursor-pointer"
-                      style={{
-                        backgroundColor: devTab === 'logs' ? 'var(--clr-primary-a0)' : 'transparent',
-                        color: devTab === 'logs' ? 'var(--clr-dark-a0)' : 'var(--clr-surface-a40)',
-                        borderBottom: devTab === 'logs' ? `2px solid var(--clr-primary-a0)` : 'none',
-                      }}
-                    >
-                      Upload Logs ({uploadLogs.length})
                     </button>
                   </div>
 
@@ -9045,49 +9174,7 @@ POINT_1 ...`}
                         )}
                       </div>
                     )}
-
-                    {devTab === 'logs' && (
-                      <div className="mx-auto w-full max-w-7xl space-y-4">
-                        <p className="text-sm" style={{ color: 'var(--clr-surface-a50)' }}>
-                          Developer-only history of uploaded HSC questions, including when each question was added to the database.
-                        </p>
-
-                        {uploadLogsError && (
-                          <div
-                            className="rounded-2xl border px-4 py-3 text-sm"
-                            style={{
-                              backgroundColor: 'rgba(185, 28, 28, 0.06)',
-                              borderColor: 'rgba(185, 28, 28, 0.18)',
-                              color: 'var(--clr-danger-a0)',
-                            }}
-                          >
-                            {uploadLogsError}
-                          </div>
-                        )}
-
-                        {uploadLogsLoading ? (
-                          <div
-                            className="rounded-3xl border p-10 text-center text-sm"
-                            style={{
-                              backgroundColor: 'var(--clr-surface-a0)',
-                              borderColor: 'var(--clr-surface-tonal-a20)',
-                              color: 'var(--clr-surface-a50)',
-                            }}
-                          >
-                            Loading upload logs...
-                          </div>
-                        ) : (
-                          <InteractiveLogsTable
-                            logs={uploadLogs}
-                            title="Question Upload History"
-                            description="Search and filter every uploaded question by subject, upload source, and status. Expand a row to inspect the full question text and metadata."
-                          />
-                        )}
-                      </div>
-                    )}
                   </div>
-                    </>
-                  )}
                 </div>
               )}
 

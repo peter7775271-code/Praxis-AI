@@ -9,6 +9,7 @@ export type DashboardViewMode =
   | 'syllabus'
   | 'settings'
   | 'dev-questions'
+  | 'logs'
   | 'papers'
   | 'paper';
 
