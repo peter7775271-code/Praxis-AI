@@ -46,6 +46,7 @@ import {
   GraduationCap,
   FileText,
   Info,
+  ScrollText,
 } from 'lucide-react';
 import { getStroke } from 'perfect-freehand';
 import type {
@@ -83,6 +84,7 @@ import type {
   TopicStat,
 } from './types';
 import { ComboboxDemo } from '@/components/ui/demo';
+import { InteractiveLogsTable } from '@/components/ui/interactive-logs-table-shadcnui';
 import type {
   Filter as ManageQuestionChipFilter,
   FilterConfig as ManageQuestionFilterConfig,
@@ -4345,7 +4347,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
   }, [examRemainingMs]);
 
-  const viewModeLabel = viewMode === 'dashboard' ? 'Dashboard' : viewMode === 'analytics' ? 'Analytics Hub' : viewMode === 'browse' ? 'Browse Bank' : viewMode === 'builder' ? 'Exam Architect' : viewMode === 'formulas' ? 'Formula Vault' : viewMode === 'saved' ? 'Saved Content' : viewMode === 'history' ? 'My History' : viewMode === 'syllabus' ? 'Syllabus' : viewMode === 'papers' || viewMode === 'paper' ? 'Exam' : viewMode === 'settings' ? 'Settings' : viewMode === 'dev-questions' ? 'Dev Mode' : String(viewMode).replace(/-/g, ' ');
+  const viewModeLabel = viewMode === 'dashboard' ? 'Dashboard' : viewMode === 'analytics' ? 'Analytics Hub' : viewMode === 'browse' ? 'Browse Bank' : viewMode === 'builder' ? 'Exam Architect' : viewMode === 'formulas' ? 'Formula Vault' : viewMode === 'saved' ? 'Saved Content' : viewMode === 'history' ? 'My History' : viewMode === 'syllabus' ? 'Syllabus' : viewMode === 'papers' || viewMode === 'paper' ? 'Exam' : viewMode === 'settings' ? 'Settings' : viewMode === 'dev-questions' ? 'Dev Mode' : viewMode === 'logs' ? 'Upload Logs' : String(viewMode).replace(/-/g, ' ');
   const paperDisplayGroups = useMemo(() => {
     const groups: Array<{ startIndex: number; endIndex: number; label: string }> = [];
     if (!paperQuestions.length) return groups;
@@ -4494,6 +4496,12 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                 <button onClick={() => { setViewMode('dev-questions'); router.push('/dashboard/dev-questions'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 text-left cursor-pointer text-amber-700 bg-amber-50 hover:bg-amber-100 font-medium text-sm shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass}`}>
                   <FileText size={18} className="shrink-0" />
                   <span className={`text-sm whitespace-nowrap transition-all duration-200 ${sidebarTextTightClass}`}>Dev Mode ON</span>
+                </button>
+              )}
+              {isDevMode && (
+                <button onClick={() => { setViewMode('logs'); router.push('/dashboard/logs'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'logs' ? 'text-amber-800 bg-amber-100 font-semibold' : 'text-amber-700 bg-amber-50 hover:bg-amber-100 font-medium text-sm'}`}>
+                  <ScrollText size={18} className="shrink-0" />
+                  <span className={`text-sm whitespace-nowrap transition-all duration-200 ${sidebarTextTightClass}`}>Upload Logs</span>
                 </button>
               )}
               <button onClick={() => { setViewMode('settings'); router.push('/dashboard/settings'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'settings' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
@@ -7383,6 +7391,13 @@ POINT_1 ...`}
                       )}
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* Dev Mode - Upload Logs Page */}
+              {viewMode === 'logs' && (
+                <div className="flex-1 flex flex-col h-full">
+                  <InteractiveLogsTable />
                 </div>
               )}
 
