@@ -35,7 +35,7 @@ export default function DevQuestionsView({
   reviewVerifyExamOptions, ALL_TOPICS, availablePapers,
   filteredManageQuestions, filteredManageQuestionIds,
   continueManageDragSelection, setAllManageSelections, setSelectedExamIncomplete,
-  fetchTaxonomy, handleClipboardImagePaste, loadImageMapExam,
+  fetchTaxonomy, handleClipboardImagePaste, loadImageMapExam, handleGraphPaste, handleGraphUpload,
   openManageImageMap, manageExamBuckets, groupingPaperBuckets, deleteSelectedQuestions,
   clearSelectedMarkingCriteria, clearSelectedQuestionGroups, manageQuestionFilterConfig,
   manageQuestionFilterGroups, hasManageFilters, resetManageFilters, saveManageQuestion,
