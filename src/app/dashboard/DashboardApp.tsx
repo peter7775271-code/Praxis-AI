@@ -6120,13 +6120,10 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                     </div>
                     <button
                       onClick={() => setViewMode('browse')}
-                      className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all cursor-pointer"
-                      style={{
-                        backgroundColor: '#dbeafe',
-                        color: '#1d4ed8',
-                      }}
+                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all cursor-pointer border"
+                      style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
                     >
-                      <RefreshCw className="w-5 h-5" />
+                      <RefreshCw className="w-4 h-4" />
                       Browse exams
                     </button>
                   </div>
@@ -6144,8 +6141,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                         </button>
                         <button
                           onClick={() => removeSavedAttempt(selectedAttempt.id)}
-                          className="text-sm font-medium cursor-pointer px-4 py-2 rounded-xl transition-colors"
-                          style={{ backgroundColor: '#ffcdd2', color: '#c62828' }}
+                          className="text-sm font-medium cursor-pointer px-4 py-2 rounded-lg transition-colors"
+                          style={{ color: 'var(--clr-surface-a50)' }}
                         >
                           Unsave
                         </button>
@@ -6200,15 +6197,15 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                                           onClick={() => setSavedExamReviewIndex(i)}
                                           className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition cursor-pointer"
                                           style={{
-                                            backgroundColor: savedExamReviewIndex === i ? '#dbeafe' : 'transparent',
-                                            color: savedExamReviewIndex === i ? '#1d4ed8' : 'var(--clr-primary-a50)',
+                                            backgroundColor: savedExamReviewIndex === i ? 'var(--clr-surface-tonal-a20)' : 'transparent',
+                                            color: 'var(--clr-primary-a50)',
                                           }}
                                         >
                                           <div className="flex items-center gap-2">
-                                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isCorrect ? 'bg-green-400' : isPartial ? 'bg-yellow-400' : isWrong ? 'bg-red-400' : 'bg-neutral-300'}`} />
+                                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isCorrect ? 'bg-green-400' : isPartial ? 'bg-amber-400' : isWrong ? 'bg-red-400' : 'bg-neutral-300'}`} />
                                             <span>Q{i + 1}</span>
                                             {score !== null && (
-                                              <span className="ml-auto text-xs opacity-70">{score}/{maxMarks}</span>
+                                              <span className="ml-auto text-xs opacity-50">{score}/{maxMarks}</span>
                                             )}
                                           </div>
                                         </button>
@@ -6230,12 +6227,11 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                                           onClick={() => setSavedExamReviewIndex(i)}
                                           className="w-full flex items-center justify-center p-1.5 rounded-lg text-xs font-bold transition cursor-pointer"
                                           style={{
-                                            backgroundColor: savedExamReviewIndex === i ? '#dbeafe' : 'transparent',
-                                            color: savedExamReviewIndex === i ? '#1d4ed8' : 'var(--clr-primary-a50)',
+                                            backgroundColor: savedExamReviewIndex === i ? 'var(--clr-surface-tonal-a20)' : 'transparent',
                                           }}
                                           title={`Question ${i + 1}${score !== null ? ` — ${score}/${maxMarks}` : ''}`}
                                         >
-                                          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isCorrect ? 'bg-green-100 text-green-700' : isPartial ? 'bg-yellow-100 text-yellow-700' : isWrong ? 'bg-red-100 text-red-700' : 'bg-neutral-100 text-neutral-600'}`}>{i + 1}</span>
+                                          <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isCorrect ? 'bg-green-100 text-green-700' : isPartial ? 'bg-amber-100 text-amber-700' : isWrong ? 'bg-red-100 text-red-700' : 'bg-neutral-100 text-neutral-600'}`}>{i + 1}</span>
                                         </button>
                                       );
                                     })}
@@ -6368,9 +6364,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                                         </div>
                                       )}
                                       <div className="border-t p-6 flex items-center justify-between gap-3" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
-                                        <button onClick={() => setSavedExamReviewIndex((i) => Math.max(0, i - 1))} disabled={savedExamReviewIndex === 0} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer" style={{ backgroundColor: '#f3e8ff', color: '#6d28d9' }}><ChevronLeft className="w-4 h-4" />Previous</button>
+                                        <button onClick={() => setSavedExamReviewIndex((i) => Math.max(0, i - 1))} disabled={savedExamReviewIndex === 0} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}><ChevronLeft className="w-4 h-4" />Previous</button>
                                         <span className="text-sm" style={{ color: 'var(--clr-surface-a40)' }}>{savedExamReviewIndex + 1} / {selectedAttempt.examAttempts?.length ?? 0}</span>
-                                        <button onClick={() => setSavedExamReviewIndex((i) => Math.min((selectedAttempt.examAttempts?.length ?? 1) - 1, i + 1))} disabled={savedExamReviewIndex >= (selectedAttempt.examAttempts?.length ?? 0) - 1} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer" style={{ backgroundColor: '#dbeafe', color: '#1d4ed8' }}>Next<ChevronRight className="w-4 h-4" /></button>
+                                        <button onClick={() => setSavedExamReviewIndex((i) => Math.min((selectedAttempt.examAttempts?.length ?? 1) - 1, i + 1))} disabled={savedExamReviewIndex >= (selectedAttempt.examAttempts?.length ?? 0) - 1} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}>Next<ChevronRight className="w-4 h-4" /></button>
                                       </div>
                                     </div>
                                   );
@@ -6384,8 +6380,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
                                 <div className="flex items-center gap-2 mb-1">
-                                  <span className="text-xs font-bold uppercase tracking-widest px-2 py-1 rounded-full" style={{ backgroundColor: '#dbeafe', color: '#1d4ed8' }}>Exam</span>
-                                  {selectedAttempt.paperGrade && <span className="text-xs font-medium px-2 py-1 rounded-full" style={{ backgroundColor: '#f3e8ff', color: '#6d28d9' }}>{selectedAttempt.paperGrade}</span>}
+                                  <span className="text-xs font-medium uppercase tracking-widest" style={{ color: 'var(--clr-surface-a40)' }}>Exam</span>
+                                  {selectedAttempt.paperGrade && <><span style={{ color: 'var(--clr-surface-a40)' }}>·</span><span className="text-xs font-medium" style={{ color: 'var(--clr-surface-a40)' }}>{selectedAttempt.paperGrade}</span></>}
                                 </div>
                                 <h1 className="text-2xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>{selectedAttempt.paperYear} {selectedAttempt.paperSubject}</h1>
                                 <p className="text-sm mt-1" style={{ color: 'var(--clr-surface-a40)' }}>
@@ -6397,29 +6393,29 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
                             {/* Stats */}
                             <div className="grid gap-4 sm:grid-cols-3">
-                              <div className="rounded-xl border p-4" style={{ backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }}>
+                              <div className="rounded-xl border p-4" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)' }}>
                                 <div className="flex items-center gap-2 mb-1">
-                                  <Award className="w-4 h-4" style={{ color: '#16a34a' }} />
-                                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: '#16a34a' }}>Total Score</div>
+                                  <Award className="w-4 h-4" style={{ color: 'var(--clr-surface-a40)' }} />
+                                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--clr-surface-a40)' }}>Total Score</div>
                                 </div>
-                                <div className="text-2xl font-bold" style={{ color: '#15803d' }}>{selectedAttempt.totalScore} / {selectedAttempt.totalPossible}</div>
+                                <div className="text-2xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>{selectedAttempt.totalScore} / {selectedAttempt.totalPossible}</div>
                               </div>
-                              <div className="rounded-xl border p-4" style={{ backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }}>
+                              <div className="rounded-xl border p-4" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)' }}>
                                 <div className="flex items-center gap-2 mb-1">
-                                  <Target className="w-4 h-4" style={{ color: '#2563eb' }} />
-                                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: '#2563eb' }}>Percentage</div>
+                                  <Target className="w-4 h-4" style={{ color: 'var(--clr-surface-a40)' }} />
+                                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--clr-surface-a40)' }}>Percentage</div>
                                 </div>
-                                <div className="text-2xl font-bold" style={{ color: '#1d4ed8' }}>{selectedAttempt.totalPossible > 0 ? Math.round((selectedAttempt.totalScore / selectedAttempt.totalPossible) * 100) : 0}%</div>
-                                <div className="mt-2 rounded-full overflow-hidden" style={{ height: 4, backgroundColor: '#dbeafe' }}>
-                                  <div className="h-full rounded-full" style={{ width: `${selectedAttempt.totalPossible > 0 ? Math.round((selectedAttempt.totalScore / selectedAttempt.totalPossible) * 100) : 0}%`, backgroundColor: '#3b82f6' }} />
+                                <div className="text-2xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>{selectedAttempt.totalPossible > 0 ? Math.round((selectedAttempt.totalScore / selectedAttempt.totalPossible) * 100) : 0}%</div>
+                                <div className="mt-2 rounded-full overflow-hidden" style={{ height: 4, backgroundColor: 'var(--clr-surface-tonal-a20)' }}>
+                                  <div className="h-full rounded-full" style={{ width: `${selectedAttempt.totalPossible > 0 ? Math.round((selectedAttempt.totalScore / selectedAttempt.totalPossible) * 100) : 0}%`, backgroundColor: 'var(--clr-primary-a50)' }} />
                                 </div>
                               </div>
-                              <div className="rounded-xl border p-4" style={{ backgroundColor: '#fdf4ff', borderColor: '#e9d5ff' }}>
+                              <div className="rounded-xl border p-4" style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)' }}>
                                 <div className="flex items-center gap-2 mb-1">
-                                  <Hash className="w-4 h-4" style={{ color: '#7c3aed' }} />
-                                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: '#7c3aed' }}>Questions</div>
+                                  <Hash className="w-4 h-4" style={{ color: 'var(--clr-surface-a40)' }} />
+                                  <div className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--clr-surface-a40)' }}>Questions</div>
                                 </div>
-                                <div className="text-2xl font-bold" style={{ color: '#6d28d9' }}>{selectedAttempt.examAttempts?.length ?? 0}</div>
+                                <div className="text-2xl font-bold" style={{ color: 'var(--clr-primary-a50)' }}>{selectedAttempt.examAttempts?.length ?? 0}</div>
                               </div>
                             </div>
 
@@ -6449,9 +6445,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                                       const isWrong = score !== null && score === 0;
                                       return (
                                         <li key={i} className="flex items-center gap-3 px-4 py-2.5" style={{ backgroundColor: 'var(--clr-surface-a0)' }}>
-                                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${isCorrect ? 'bg-green-100 text-green-700' : isPartial ? 'bg-yellow-100 text-yellow-700' : isWrong ? 'bg-red-100 text-red-700' : 'bg-neutral-100 text-neutral-500'}`}>{i + 1}</span>
+                                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${isCorrect ? 'bg-green-100 text-green-700' : isPartial ? 'bg-amber-100 text-amber-700' : isWrong ? 'bg-red-100 text-red-700' : 'bg-neutral-100 text-neutral-500'}`}>{i + 1}</span>
                                           <span className="flex-1 text-sm truncate" style={{ color: 'var(--clr-primary-a50)' }}>{a.question?.question_text ? a.question.question_text.replace(/\$[^$]*\$/g, '[math]').substring(0, 60) + (a.question.question_text.length > 60 ? '…' : '') : `Question ${i + 1}`}</span>
-                                          <span className="text-sm font-semibold" style={{ color: isCorrect ? '#16a34a' : isPartial ? '#ca8a04' : isWrong ? '#dc2626' : 'var(--clr-surface-a40)' }}>
+                                          <span className="text-sm font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>
                                             {score !== null ? `${score}/${maxMarks}` : `—/${maxMarks}`}
                                           </span>
                                           {pct !== null && <span className="text-xs w-10 text-right" style={{ color: 'var(--clr-surface-a40)' }}>{pct}%</span>}
@@ -6467,8 +6463,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                             <div className="flex flex-wrap items-center gap-3">
                               <button
                                 onClick={() => openSavedExamAsPaper(selectedAttempt)}
-                                className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold cursor-pointer transition-colors"
-                                style={{ backgroundColor: '#dbeafe', color: '#1d4ed8' }}
+                                className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium border cursor-pointer transition-colors"
+                                style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
                               >
                                 <BookOpen className="w-5 h-5" />
                                 View as Paper
@@ -6476,8 +6472,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                               <button
                                 onClick={() => exportSavedExamPdf(false)}
                                 disabled={exportingSavedExamPdf !== null}
-                                className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                style={{ backgroundColor: '#f3e8ff', color: '#6d28d9' }}
+                                className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
                               >
                                 <Download className="w-5 h-5" />
                                 {exportingSavedExamPdf === 'exam' ? 'Exporting…' : 'Export PDF'}
@@ -6485,16 +6481,16 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                               <button
                                 onClick={() => exportSavedExamPdf(true)}
                                 disabled={exportingSavedExamPdf !== null}
-                                className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                style={{ backgroundColor: '#dcfce7', color: '#15803d' }}
+                                className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
                               >
                                 <Download className="w-5 h-5" />
                                 {exportingSavedExamPdf === 'solutions' ? 'Exporting…' : 'Export + Solutions'}
                               </button>
                               <button
                                 onClick={() => { setSavedExamReviewMode(true); setSavedExamReviewIndex(0); setSavedReviewSidebarCollapsed(false); }}
-                                className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold cursor-pointer transition-colors"
-                                style={{ backgroundColor: '#fef9c3', color: '#854d0e' }}
+                                className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium border cursor-pointer transition-colors"
+                                style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
                               >
                                 <Eye className="w-5 h-5" />
                                 Review Questions
@@ -6749,21 +6745,13 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                                     <div className="flex-1 min-w-0">
                                       <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
                                         <span
-                                          className="text-xs font-bold uppercase tracking-widest px-2 py-0.5 rounded-full"
-                                          style={isExam ? { backgroundColor: '#dbeafe', color: '#1d4ed8' } : { backgroundColor: '#f3e8ff', color: '#6d28d9' }}
+                                          className="text-xs font-medium uppercase tracking-widest"
+                                          style={{ color: 'var(--clr-surface-a40)' }}
                                         >
-                                          {isExam ? 'Exam' : 'Question'}
+                                          {isExam ? 'Exam' : 'Question'}{!isExam && attempt.questionType === 'multiple_choice' ? ' · MCQ' : ''}
                                         </span>
-                                        {isExam && attempt.paperGrade && (
-                                          <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: '#f0fdf4', color: '#16a34a' }}>
-                                            {attempt.paperGrade}
-                                          </span>
-                                        )}
-                                        {!isExam && attempt.questionType === 'multiple_choice' && (
-                                          <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: '#fff7ed', color: '#c2410c' }}>MCQ</span>
-                                        )}
                                       </div>
-                                      <h3 className="font-bold text-base leading-tight truncate" style={{ color: 'var(--clr-primary-a50)' }}>
+                                      <h3 className="font-semibold text-base leading-tight truncate" style={{ color: 'var(--clr-primary-a50)' }}>
                                         {isExam ? [attempt.paperYear, attempt.paperSubject].filter(Boolean).join(' ') : attempt.subject}
                                       </h3>
                                       <p className="text-xs mt-0.5" style={{ color: 'var(--clr-surface-a40)' }}>
@@ -6774,13 +6762,13 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                                     <div className="flex-shrink-0 text-right">
                                       {isExam ? (
                                         <div>
-                                          <div className="text-xl font-bold leading-none" style={{ color: '#16a34a' }}>
+                                          <div className="text-xl font-bold leading-none" style={{ color: 'var(--clr-primary-a50)' }}>
                                             {attempt.totalScore}<span className="text-sm font-medium" style={{ color: 'var(--clr-surface-a40)' }}>/{attempt.totalPossible}</span>
                                           </div>
-                                          {pct !== null && <div className="text-xs font-semibold mt-0.5" style={{ color: '#16a34a' }}>{pct}%</div>}
+                                          {pct !== null && <div className="text-xs font-semibold mt-0.5" style={{ color: 'var(--clr-surface-a40)' }}>{pct}%</div>}
                                         </div>
                                       ) : (
-                                        <div className="text-xl font-bold leading-none" style={{ color: '#7c3aed' }}>
+                                        <div className="text-xl font-bold leading-none" style={{ color: 'var(--clr-primary-a50)' }}>
                                           {attempt.marks}<span className="text-xs font-medium" style={{ color: 'var(--clr-surface-a40)' }}> marks</span>
                                         </div>
                                       )}
@@ -6789,10 +6777,10 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
                                   {/* Exam progress bar */}
                                   {isExam && pct !== null && (
-                                    <div className="mb-3 rounded-full overflow-hidden" style={{ height: 5, backgroundColor: '#e0f2fe' }}>
+                                    <div className="mb-3 rounded-full overflow-hidden" style={{ height: 4, backgroundColor: 'var(--clr-surface-tonal-a20)' }}>
                                       <div
                                         className="h-full rounded-full"
-                                        style={{ width: `${pct}%`, backgroundColor: pct >= 80 ? '#16a34a' : pct >= 60 ? '#ca8a04' : '#dc2626' }}
+                                        style={{ width: `${pct}%`, backgroundColor: 'var(--clr-primary-a50)' }}
                                       />
                                     </div>
                                   )}
@@ -6829,7 +6817,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                                   <button
                                     onClick={(e) => { e.stopPropagation(); removeSavedAttempt(attempt.id); }}
                                     className="text-xs font-semibold cursor-pointer px-3 py-1.5 rounded-lg transition-colors"
-                                    style={{ backgroundColor: '#ffcdd2', color: '#c62828' }}
+                                    style={{ color: 'var(--clr-surface-a50)' }}
                                   >
                                     Unsave
                                   </button>
