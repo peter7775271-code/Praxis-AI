@@ -1619,6 +1619,13 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   }, []);
 
+  // Auto-load questions when entering settings view (needed for exam dropdown in Syllabus Dot Point Mapping)
+  useEffect(() => {
+    if (viewMode === 'settings' && !allQuestions.length && !loadingQuestions) {
+      fetchAllQuestions({ includeIncomplete: true });
+    }
+  }, [viewMode]);
+
   // Fetch questions when entering review tab
   useEffect(() => {
     if (viewMode === 'dev-questions' && devTab === 'review') {
@@ -6935,27 +6942,38 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                         <div className="space-y-4">
                           <div>
                             <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Exam</label>
-                            <select
-                              value={selectedSyllabusMappingPaper}
-                              onChange={(e) => setSelectedSyllabusMappingPaper(e.target.value)}
-                              disabled={isMappingSyllabusDotPoints || availablePapers.length === 0}
-                              className="mt-2 w-full px-4 py-2 rounded-lg border"
-                              style={{
-                                backgroundColor: 'var(--clr-surface-a0)',
-                                borderColor: 'var(--clr-surface-tonal-a20)',
-                                color: 'var(--clr-primary-a50)',
-                              }}
-                            >
-                              {availablePapers.length === 0 ? (
-                                <option value="">No exam papers available</option>
-                              ) : (
-                                availablePapers.map((paper) => (
-                                  <option key={getPaperKey(paper)} value={getPaperKey(paper)}>
-                                    {paper.year} • {paper.grade} • {paper.subject} • {paper.school} ({paper.count} questions)
-                                  </option>
-                                ))
-                              )}
-                            </select>
+                            <div className="mt-2 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 items-center">
+                              <select
+                                value={selectedSyllabusMappingPaper}
+                                onChange={(e) => setSelectedSyllabusMappingPaper(e.target.value)}
+                                disabled={isMappingSyllabusDotPoints || loadingQuestions || availablePapers.length === 0}
+                                className="w-full px-4 py-2 rounded-lg border"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                  color: 'var(--clr-primary-a50)',
+                                }}
+                              >
+                                {availablePapers.length === 0 ? (
+                                  <option value="">{loadingQuestions ? 'Loading exams…' : 'No exam papers loaded'}</option>
+                                ) : (
+                                  availablePapers.map((paper) => (
+                                    <option key={getPaperKey(paper)} value={getPaperKey(paper)}>
+                                      {paper.year} • {paper.grade} • {paper.subject} • {paper.school} ({paper.count} questions)
+                                    </option>
+                                  ))
+                                )}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => void fetchAllQuestions({ includeIncomplete: true })}
+                                disabled={loadingQuestions || isMappingSyllabusDotPoints}
+                                className="px-4 py-2 rounded-lg text-sm font-medium cursor-pointer disabled:opacity-50"
+                                style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-primary-a50)' }}
+                              >
+                                {loadingQuestions ? 'Loading…' : 'Load Exams'}
+                              </button>
+                            </div>
                           </div>
 
                           <div>
