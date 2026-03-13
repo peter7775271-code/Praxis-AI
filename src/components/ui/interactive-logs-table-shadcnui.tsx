@@ -444,14 +444,14 @@ function FilterPanel({
 // Main component
 // ---------------------------------------------------------------------------
 
-const LIMIT_OPTIONS = [25, 50, 100] as const;
+const LIMIT_OPTIONS = [3, 7, 25, 50, 100] as const;
 type LimitOption = (typeof LIMIT_OPTIONS)[number] | "all";
 
 export function InteractiveLogsTable() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>({ subject: [], grade: [] });
-  const [limit, setLimit] = useState<LimitOption>(25);
+  const [limit, setLimit] = useState<LimitOption>(3);
   const [logs, setLogs] = useState<QuestionLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
