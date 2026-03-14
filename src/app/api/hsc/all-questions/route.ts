@@ -30,12 +30,15 @@ export async function GET(request: Request) {
     const search = searchParams.get('search');
     const missingImagesOnly = searchParams.get('missingImagesOnly') === 'true';
     const includeIncomplete = searchParams.get('includeIncomplete') === 'true';
+    const since = searchParams.get('since');
 
     const buildQuery = (excludeIncomplete: boolean, columns: string = HSC_QUESTION_COLUMNS) => {
       let query = supabaseAdmin
         .from('hsc_questions')
         .select(columns)
         .order('created_at', { ascending: false });
+
+      if (since) query = query.gte('created_at', since);
 
       if (grades.length === 1) query = query.eq('grade', grades[0]);
       if (grades.length > 1) query = query.in('grade', grades);
