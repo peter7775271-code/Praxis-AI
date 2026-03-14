@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     // Fetch nutrition history for this user
     const { data, error } = await supabaseAdmin
       .from('nutrition_entries')
-      .select('*')
+      .select('id, user_id, product_name, image_data, nutrition_info, health_score, ingredients_breakdown, created_at')
       .eq('user_id', decoded.userId)
       .order('created_at', { ascending: false });
 

@@ -96,7 +96,7 @@ export async function authenticateUser(
 ): Promise<User | null> {
   const { data: user, error } = await supabaseAdmin
     .from('users')
-    .select('*')
+    .select('id, email, name, password, created_at, verified, verification_token')
     .eq('email', email)
     .single();
 
