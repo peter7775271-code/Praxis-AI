@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '@/lib/db';
 
 const isMissingColumnError = (message: string) => {
-  return /Could not find the 'exam_incomplete' column|column\s+"?exam_incomplete"?\s+does not exist/i.test(message);
+  return /Could not find the '[^']+' column|column\s+"?[^"\s]+"?\s+does not exist/i.test(message);
 };
 
 const HSC_QUESTION_COLUMNS = [
@@ -30,12 +30,15 @@ export async function GET(request: Request) {
     const search = searchParams.get('search');
     const missingImagesOnly = searchParams.get('missingImagesOnly') === 'true';
     const includeIncomplete = searchParams.get('includeIncomplete') === 'true';
+    const since = searchParams.get('since');
 
-    const buildQuery = (excludeIncomplete: boolean) => {
+    const buildQuery = (excludeIncomplete: boolean, columns: string = HSC_QUESTION_COLUMNS) => {
       let query = supabaseAdmin
         .from('hsc_questions')
-        .select(HSC_QUESTION_COLUMNS)
+        .select(columns)
         .order('created_at', { ascending: false });
+
+      if (since) query = query.gte('created_at', since);
 
       if (grades.length === 1) query = query.eq('grade', grades[0]);
       if (grades.length > 1) query = query.in('grade', grades);
@@ -72,22 +75,30 @@ export async function GET(request: Request) {
     const allRows: any[] = [];
     let shouldExcludeIncomplete = !includeIncomplete;
     let hasRetriedWithoutIncompleteFilter = false;
+    let columns = HSC_QUESTION_COLUMNS;
 
     while (true) {
       const to = from + PAGE_SIZE - 1;
-      const { data, error } = await buildQuery(shouldExcludeIncomplete).range(from, to);
+      const { data, error } = await buildQuery(shouldExcludeIncomplete, columns).range(from, to);
 
       if (error) {
-        if (
-          shouldExcludeIncomplete
-          && !hasRetriedWithoutIncompleteFilter
-          && isMissingColumnError(String(error.message || ''))
-        ) {
-          hasRetriedWithoutIncompleteFilter = true;
-          shouldExcludeIncomplete = false;
-          from = 0;
-          allRows.length = 0;
-          continue;
+        if (isMissingColumnError(String(error.message || ''))) {
+          if (shouldExcludeIncomplete && !hasRetriedWithoutIncompleteFilter) {
+            // Try dropping the incomplete filter first (preserves column optimisation)
+            hasRetriedWithoutIncompleteFilter = true;
+            shouldExcludeIncomplete = false;
+            from = 0;
+            allRows.length = 0;
+            continue;
+          }
+
+          if (columns !== '*') {
+            // Fall back to selecting all columns when an explicit column is missing from the schema
+            columns = '*';
+            from = 0;
+            allRows.length = 0;
+            continue;
+          }
         }
 
         console.error('[all-questions] Supabase error:', error.message, error.code);

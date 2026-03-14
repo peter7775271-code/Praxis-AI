@@ -4139,14 +4139,16 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     return arr;
   };
 
-  const loadQuestionsForBuilder = async () => {
-    if (allQuestions.length) return visibleAllQuestions as Question[];
+  const loadQuestionsForBuilder = async (grade?: string, subject?: string) => {
     try {
       setLoadingQuestions(true);
-      const response = await fetch('/api/hsc/all-questions');
+      const params = new URLSearchParams();
+      if (grade) params.set('grade', grade);
+      if (subject) params.set('subject', subject);
+      const url = params.toString() ? `/api/hsc/all-questions?${params}` : '/api/hsc/all-questions';
+      const response = await fetch(url);
       const data = await response.json().catch(() => ([]));
       const rows = Array.isArray(data) ? data : [];
-      setAllQuestions(rows);
       return rows.filter((q) => !isExamIncomplete((q as any)?.exam_incomplete)) as Question[];
     } catch (err) {
       console.error('Error loading questions for builder:', err);
@@ -4160,7 +4162,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     setIsInitializingExam(true);
     try {
       clearPaperState();
-      const pool = await loadQuestionsForBuilder();
+      const pool = await loadQuestionsForBuilder(params.grade, params.subject);
       const gradeSubjectPool = pool.filter((q) => {
         if (String(q.grade) !== params.grade) return false;
         if (String(q.subject) !== params.subject) return false;

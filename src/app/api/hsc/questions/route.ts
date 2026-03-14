@@ -2,7 +2,7 @@ import { supabaseAdmin } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 
 const isMissingColumnError = (message: string) => {
-  return /Could not find the 'exam_incomplete' column|column\s+"?exam_incomplete"?\s+does not exist/i.test(message);
+  return /Could not find the '[^']+' column|column\s+"?[^"\s]+"?\s+does not exist/i.test(message);
 };
 
 const HSC_QUESTION_COLUMNS = [
@@ -70,10 +70,20 @@ export async function GET(request: NextRequest) {
 
     // Step 2: Fetch only the single random question using a random offset
     const randomOffset = Math.floor(Math.random() * count);
-    const { data: rows, error } = await applyFilters(
+    let { data: rows, error } = await applyFilters(
       supabaseAdmin.from('hsc_questions').select(HSC_QUESTION_COLUMNS),
       shouldExcludeIncomplete
     ).range(randomOffset, randomOffset);
+
+    if (error && isMissingColumnError(String(error.message || ''))) {
+      // Fall back to selecting all columns when an explicit column is missing from the schema
+      const retryResult = await applyFilters(
+        supabaseAdmin.from('hsc_questions').select('*'),
+        shouldExcludeIncomplete
+      ).range(randomOffset, randomOffset);
+      rows = retryResult.data;
+      error = retryResult.error;
+    }
 
     if (error) {
       console.error('[questions] Supabase error:', error.message, error.code);
