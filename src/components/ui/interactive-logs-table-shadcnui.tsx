@@ -447,6 +447,14 @@ function FilterPanel({
 const LIMIT_OPTIONS = [3, 7, 25, 50, 100] as const;
 type LimitOption = (typeof LIMIT_OPTIONS)[number] | "all";
 
+/** Returns an ISO 8601 string for midnight N days ago (UTC). */
+function daysAgoISO(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
 export function InteractiveLogsTable() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -456,11 +464,16 @@ export function InteractiveLogsTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchLogs = useCallback(async () => {
+  const fetchLogs = useCallback(async (signal?: AbortSignal, days?: number | "all") => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/hsc/all-questions");
+      const params = new URLSearchParams();
+      if (days !== "all" && days !== undefined) {
+        params.set("since", daysAgoISO(days));
+      }
+      const url = params.toString() ? `/api/hsc/all-questions?${params}` : "/api/hsc/all-questions";
+      const res = await fetch(url, signal ? { signal } : undefined);
       if (!res.ok) throw new Error(`Failed to fetch: ${res.statusText}`);
       const data = await res.json();
       const questions: QuestionLog[] = (Array.isArray(data) ? data : [])
@@ -508,15 +521,19 @@ export function InteractiveLogsTable() {
         );
       setLogs(questions);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "Failed to load logs");
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Fetch (or re-fetch) whenever the day-limit changes.
   useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
+    const controller = new AbortController();
+    fetchLogs(controller.signal, limit);
+    return () => controller.abort();
+  }, [fetchLogs, limit]);
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
@@ -588,10 +605,10 @@ export function InteractiveLogsTable() {
         }
       } catch (err) {
         alert(err instanceof Error ? err.message : "Failed to save flag");
-        fetchLogs();
+        fetchLogs(undefined, limit);
       }
     },
-    [fetchLogs]
+    [fetchLogs, limit]
   );
 
   return (
