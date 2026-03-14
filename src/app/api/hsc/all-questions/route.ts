@@ -4,6 +4,17 @@ const isMissingColumnError = (message: string) => {
   return /Could not find the 'exam_incomplete' column|column\s+"?exam_incomplete"?\s+does not exist/i.test(message);
 };
 
+const HSC_QUESTION_COLUMNS = [
+  'id', 'grade', 'year', 'subject', 'school_name', 'paper_number', 'paper_label',
+  'topic', 'subtopic', 'syllabus_dot_point', 'marks', 'question_number',
+  'question_text', 'question_type', 'graph_image_data', 'graph_image_size',
+  'marking_criteria', 'sample_answer', 'sample_answer_image', 'sample_answer_image_size',
+  'mcq_option_a', 'mcq_option_b', 'mcq_option_c', 'mcq_option_d',
+  'mcq_option_a_image', 'mcq_option_b_image', 'mcq_option_c_image', 'mcq_option_d_image',
+  'mcq_correct_answer', 'mcq_explanation', 'created_at',
+  'exam_incomplete', 'group_id', 'review_flag',
+].join(', ');
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -23,7 +34,7 @@ export async function GET(request: Request) {
     const buildQuery = (excludeIncomplete: boolean) => {
       let query = supabaseAdmin
         .from('hsc_questions')
-        .select('*')
+        .select(HSC_QUESTION_COLUMNS)
         .order('created_at', { ascending: false });
 
       if (grades.length === 1) query = query.eq('grade', grades[0]);

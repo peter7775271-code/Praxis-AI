@@ -5,6 +5,17 @@ const isMissingColumnError = (message: string) => {
   return /Could not find the 'exam_incomplete' column|column\s+"?exam_incomplete"?\s+does not exist/i.test(message);
 };
 
+const HSC_QUESTION_COLUMNS = [
+  'id', 'grade', 'year', 'subject', 'school_name', 'paper_number', 'paper_label',
+  'topic', 'subtopic', 'syllabus_dot_point', 'marks', 'question_number',
+  'question_text', 'question_type', 'graph_image_data', 'graph_image_size',
+  'marking_criteria', 'sample_answer', 'sample_answer_image', 'sample_answer_image_size',
+  'mcq_option_a', 'mcq_option_b', 'mcq_option_c', 'mcq_option_d',
+  'mcq_option_a_image', 'mcq_option_b_image', 'mcq_option_c_image', 'mcq_option_d_image',
+  'mcq_correct_answer', 'mcq_explanation', 'created_at',
+  'exam_incomplete', 'group_id', 'review_flag',
+].join(', ');
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -15,45 +26,54 @@ export async function GET(request: NextRequest) {
     const topic = searchParams.get('topic');
     const includeIncomplete = searchParams.get('includeIncomplete') === 'true';
 
-    // Build query with filters
-    let query = supabaseAdmin.from('hsc_questions').select('*');
+    const applyFilters = (query: any, excludeIncomplete: boolean) => {
+      if (grade) query = query.eq('grade', grade);
+      if (year) query = query.eq('year', parseInt(year));
+      if (subject) query = query.eq('subject', subject);
+      if (topic) query = query.eq('topic', topic);
+      if (excludeIncomplete) query = query.neq('exam_incomplete', true);
+      return query;
+    };
 
-    if (grade) {
-      query = query.eq('grade', grade);
-    }
-    if (year) {
-      query = query.eq('year', parseInt(year));
-    }
-    if (subject) {
-      query = query.eq('subject', subject);
-    }
-    if (topic) {
-      query = query.eq('topic', topic);
-    }
-    if (!includeIncomplete) {
-      query = query.neq('exam_incomplete', true);
+    let shouldExcludeIncomplete = !includeIncomplete;
+
+    // Step 1: Get the count of matching questions (transfers no row data)
+    let { count, error: countError } = await applyFilters(
+      supabaseAdmin.from('hsc_questions').select('*', { count: 'exact', head: true }),
+      shouldExcludeIncomplete
+    );
+
+    if (countError && shouldExcludeIncomplete && isMissingColumnError(String(countError.message || ''))) {
+      shouldExcludeIncomplete = false;
+      const retryResult = await applyFilters(
+        supabaseAdmin.from('hsc_questions').select('*', { count: 'exact', head: true }),
+        false
+      );
+      count = retryResult.count;
+      countError = retryResult.error;
     }
 
-    let { data, error } = await query;
-
-    if (error && !includeIncomplete && isMissingColumnError(String(error.message || ''))) {
-      let fallbackQuery = supabaseAdmin.from('hsc_questions').select('*');
-      if (grade) {
-        fallbackQuery = fallbackQuery.eq('grade', grade);
-      }
-      if (year) {
-        fallbackQuery = fallbackQuery.eq('year', parseInt(year));
-      }
-      if (subject) {
-        fallbackQuery = fallbackQuery.eq('subject', subject);
-      }
-      if (topic) {
-        fallbackQuery = fallbackQuery.eq('topic', topic);
-      }
-      const fallbackResult = await fallbackQuery;
-      data = fallbackResult.data;
-      error = fallbackResult.error;
+    if (countError) {
+      console.error('[questions] Supabase error:', countError.message, (countError as any).code);
+      return NextResponse.json(
+        { error: 'Failed to fetch questions', details: countError.message, code: (countError as any).code },
+        { status: 500 }
+      );
     }
+
+    if (!count || count === 0) {
+      return NextResponse.json(
+        { error: 'No questions found matching filters', filters: { grade, year, subject, topic } },
+        { status: 404 }
+      );
+    }
+
+    // Step 2: Fetch only the single random question using a random offset
+    const randomOffset = Math.floor(Math.random() * count);
+    const { data: rows, error } = await applyFilters(
+      supabaseAdmin.from('hsc_questions').select(HSC_QUESTION_COLUMNS),
+      shouldExcludeIncomplete
+    ).range(randomOffset, randomOffset);
 
     if (error) {
       console.error('[questions] Supabase error:', error.message, error.code);
@@ -63,16 +83,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (!data || data.length === 0) {
+    const randomQuestion = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+
+    if (!randomQuestion) {
       return NextResponse.json(
         { error: 'No questions found matching filters', filters: { grade, year, subject, topic } },
         { status: 404 }
       );
     }
 
-    // Return a random question from filtered results
-    const randomQuestion = data[Math.floor(Math.random() * data.length)];
-    
     return NextResponse.json({ question: randomQuestion });
   } catch (error) {
     return NextResponse.json(

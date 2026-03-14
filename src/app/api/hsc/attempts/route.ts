@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
 
     const { data: attemptsData, error } = await supabaseAdmin
       .from('student_saved_attempts')
-      .select('*')
+      .select('id, user_id, question_id, canvas_image_url, feedback_json, submitted_at, created_at')
       .eq('user_id', userId)
       .order('submitted_at', { ascending: false });
 
