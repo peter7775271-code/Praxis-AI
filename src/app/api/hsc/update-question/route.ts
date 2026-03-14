@@ -4,7 +4,7 @@ const extractMissingColumn = (message: string): string | null => {
   const quoted = message.match(/Could not find the '([^']+)' column/i);
   if (quoted?.[1]) return quoted[1];
 
-  const postgres = message.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+does not exist/i);
+  const postgres = message.match(/column\s+"?([a-zA-Z0-9_]+)"?(?:\s+of\s+relation\s+"?[a-zA-Z0-9_]+"?)?\s+does not exist/i);
   if (postgres?.[1]) return postgres[1];
 
   return null;

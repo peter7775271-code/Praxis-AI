@@ -91,7 +91,7 @@ import type {
   TopicStat,
 } from './types';
 import { ComboboxDemo } from '@/components/ui/demo';
-// import { InteractiveLogsTable } from '@/components/ui/interactive-logs-table-shadcnui';
+import { InteractiveLogsTable } from '@/components/ui/interactive-logs-table-shadcnui';
 import type {
   Filter as ManageQuestionChipFilter,
   FilterConfig as ManageQuestionFilterConfig,

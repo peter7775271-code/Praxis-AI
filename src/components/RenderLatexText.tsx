@@ -8,6 +8,11 @@ type Props = {
   style?: React.CSSProperties;
 };
 
+const KATEX_MACROS = {
+  '\\undertilde': '\\underset{\\sim}{#1}',
+  '\\utilde': '\\underset{\\sim}{#1}',
+};
+
 const escapeHtml = (value: string) =>
   value
     .replace(/&/g, '&amp;')
@@ -30,12 +35,25 @@ const unwrapStandaloneTextCommand = (value: string) => {
   return match[1];
 };
 
+const normalizeDisplayMathDelimiters = (value: string) => {
+  const unescapedDelimiters = value
+    .replace(/\\{2,}\[/g, '\\[')
+    .replace(/\\{2,}\]/g, '\\]');
+
+  return unescapedDelimiters.replace(/\\\[([\s\S]*?)\\\]/g, (_match, inner) => {
+    const trimmed = inner.trim();
+    return `$$${trimmed}$$`;
+  });
+};
+
 const normalizeLatexInput = (value: string) => {
-  if (hasMathDelimiters(value)) return value;
-  const withoutStandaloneText = unwrapStandaloneTextCommand(value);
-  if (withoutStandaloneText !== value) return withoutStandaloneText;
-  if (!looksLikeBareLatex(value)) return value;
-  return `\\(${value}\\)`;
+  const normalizedDisplayMath = normalizeDisplayMathDelimiters(value);
+  if (hasMathDelimiters(normalizedDisplayMath)) return normalizedDisplayMath;
+
+  const withoutStandaloneText = unwrapStandaloneTextCommand(normalizedDisplayMath);
+  if (withoutStandaloneText !== normalizedDisplayMath) return withoutStandaloneText;
+  if (!looksLikeBareLatex(normalizedDisplayMath)) return normalizedDisplayMath;
+  return `\\(${normalizedDisplayMath}\\)`;
 };
 
 const ensureKatex = () => {
@@ -99,7 +117,7 @@ export default function RenderLatexText({ text, className, style }: Props) {
 
     const render = async () => {
       const normalizedText = normalizeLatexInput(text);
-      const html = escapeHtml(normalizedText).replace(/\n/g, '<br />');
+      const html = escapeHtml(normalizedText);
       container.innerHTML = html;
 
       try {
@@ -111,10 +129,13 @@ export default function RenderLatexText({ text, className, style }: Props) {
           renderMathInElement(containerRef.current, {
             delimiters: [
               { left: '$$', right: '$$', display: true },
+              { left: '\\\\[', right: '\\\\]', display: true },
               { left: '\\[', right: '\\]', display: true },
+              { left: '\\\\(', right: '\\\\)', display: false },
               { left: '\\(', right: '\\)', display: false },
               { left: '$', right: '$', display: false },
             ],
+            macros: KATEX_MACROS,
             throwOnError: false,
             ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
           });

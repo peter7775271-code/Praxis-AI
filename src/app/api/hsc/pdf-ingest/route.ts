@@ -342,8 +342,10 @@ MCQ_OPTION_A <text for option A in LaTeX>
 MCQ_OPTION_B <text for option B in LaTeX>
 MCQ_OPTION_C <text for option C in LaTeX>
 MCQ_OPTION_D <text for option D in LaTeX>
-MCQ_CORRECT_ANSWER {A|B|C|D}
+
 MCQ_EXPLANATION <detailed LaTeX explanation: why the correct option is right, why the others are wrong; format in clear steps with blank lines between ideas so a student can follow easily>
+
+MCQ_CORRECT_ANSWER {A|B|C|D}
 
 RENDER-SAFE LaTeX rules (follow so output renders correctly):
 - Inline math: use $...$ for short expressions in prose (e.g. $x = 5$, $\\frac{1}{2}$). You may also use \\( ... \\).
@@ -447,16 +449,41 @@ const MCQ_HEADER_PREFIXES = [
   'MCQ_CORRECT_ANSWER', 'MCQ_EXPLANATION', 'QUESTION_CONTENT', 'SAMPLE_ANSWER', 'MARKING_CRITERIA',
 ];
 
+const extractMcqCorrectAnswer = (line: string): 'A' | 'B' | 'C' | 'D' | null => {
+  const match = line.match(/MCQ_CORRECT_ANSWER\s*[:\-]?\s*\{?\s*([A-D])\s*\}?/i);
+  if (!match?.[1]) return null;
+  const value = match[1].toUpperCase();
+  return value === 'A' || value === 'B' || value === 'C' || value === 'D'
+    ? (value as 'A' | 'B' | 'C' | 'D')
+    : null;
+};
+
 const parseQuestions = (content: string) => {
   const lines = content.split(/\r?\n/);
 
   const questions: ParsedQuestion[] = [];
   let current: ParsedQuestion | null = null;
   let mode: 'question' | 'answer' | 'mcq_explanation' | 'criteria' | null = null;
-  let pendingMcqOption: 'A' | 'B' | 'C' | 'D' | null = null;
+  let activeMcqOption: 'A' | 'B' | 'C' | 'D' | null = null;
+
+  const setMcqOptionValue = (option: 'A' | 'B' | 'C' | 'D', value: string | null) => {
+    if (!current) return;
+    if (option === 'A') current.mcqOptionA = value;
+    else if (option === 'B') current.mcqOptionB = value;
+    else if (option === 'C') current.mcqOptionC = value;
+    else if (option === 'D') current.mcqOptionD = value;
+  };
+
+  const getMcqOptionValue = (option: 'A' | 'B' | 'C' | 'D') => {
+    if (!current) return null;
+    if (option === 'A') return current.mcqOptionA;
+    if (option === 'B') return current.mcqOptionB;
+    if (option === 'C') return current.mcqOptionC;
+    return current.mcqOptionD;
+  };
 
   const pushCurrent = () => {
-    pendingMcqOption = null;
+    activeMcqOption = null;
     if (!current) return;
     const trimmedQuestion = current.questionText.trim();
     const trimmedAnswer = current.sampleAnswer.trim();
@@ -482,18 +509,16 @@ const parseQuestions = (content: string) => {
   for (const rawLine of lines) {
     const line = rawLine.trim();
 
-    if (pendingMcqOption && current) {
-      const nextLine = rawLine.trim();
-      if (nextLine && !MCQ_HEADER_PREFIXES.some((p) => nextLine.startsWith(p))) {
-        const value = stripOuterBraces(nextLine);
-        if (pendingMcqOption === 'A') current.mcqOptionA = value;
-        else if (pendingMcqOption === 'B') current.mcqOptionB = value;
-        else if (pendingMcqOption === 'C') current.mcqOptionC = value;
-        else if (pendingMcqOption === 'D') current.mcqOptionD = value;
-        pendingMcqOption = null;
+    if (activeMcqOption && current) {
+      const isHeaderLine = line && MCQ_HEADER_PREFIXES.some((prefix) => line.startsWith(prefix));
+      if (!isHeaderLine) {
+        const existing = getMcqOptionValue(activeMcqOption);
+        const chunk = line ? stripOuterBraces(rawLine.trim()) : '';
+        const next = existing ? `${existing}\n${chunk}` : chunk;
+        setMcqOptionValue(activeMcqOption, next);
         continue;
       }
-      if (nextLine) pendingMcqOption = null;
+      activeMcqOption = null;
     }
 
     if (!line) continue;
@@ -550,35 +575,40 @@ const parseQuestions = (content: string) => {
       mode = null;
       const v = stripOuterBraces(getHeaderValue(line).trim());
       current.mcqOptionA = v || null;
-      if (!v) pendingMcqOption = 'A';
+      activeMcqOption = 'A';
       continue;
     }
     if (line.startsWith('MCQ_OPTION_B')) {
       mode = null;
       const v = stripOuterBraces(getHeaderValue(line).trim());
       current.mcqOptionB = v || null;
-      if (!v) pendingMcqOption = 'B';
+      activeMcqOption = 'B';
       continue;
     }
     if (line.startsWith('MCQ_OPTION_C')) {
       mode = null;
       const v = stripOuterBraces(getHeaderValue(line).trim());
       current.mcqOptionC = v || null;
-      if (!v) pendingMcqOption = 'C';
+      activeMcqOption = 'C';
       continue;
     }
     if (line.startsWith('MCQ_OPTION_D')) {
       mode = null;
       const v = stripOuterBraces(getHeaderValue(line).trim());
       current.mcqOptionD = v || null;
-      if (!v) pendingMcqOption = 'D';
+      activeMcqOption = 'D';
       continue;
     }
     if (line.startsWith('MCQ_CORRECT_ANSWER')) {
       mode = null;
-      const value = stripOuterBraces(getHeaderValue(line).trim()).toUpperCase();
-      current.mcqCorrectAnswer =
-        value === 'A' || value === 'B' || value === 'C' || value === 'D' ? (value as 'A' | 'B' | 'C' | 'D') : null;
+      const extracted = extractMcqCorrectAnswer(line);
+      if (extracted) {
+        current.mcqCorrectAnswer = extracted;
+      } else {
+        const value = stripOuterBraces(getHeaderValue(line).trim()).toUpperCase();
+        current.mcqCorrectAnswer =
+          value === 'A' || value === 'B' || value === 'C' || value === 'D' ? (value as 'A' | 'B' | 'C' | 'D') : null;
+      }
       continue;
     }
     if (line.startsWith('MCQ_EXPLANATION')) {
@@ -610,6 +640,12 @@ const parseQuestions = (content: string) => {
     } else if (mode === 'answer') {
       current.sampleAnswer += `${current.sampleAnswer ? '\n' : ''}${rawLine}`;
     } else if (mode === 'mcq_explanation') {
+      const embeddedAnswer = extractMcqCorrectAnswer(line);
+      if (embeddedAnswer) {
+        current.mcqCorrectAnswer = embeddedAnswer;
+        mode = null;
+        continue;
+      }
       current.mcqExplanation = (current.mcqExplanation || '') + (current.mcqExplanation ? '\n' : '') + rawLine;
     } else if (mode === 'criteria') {
       current.markingCriteria += `${current.markingCriteria ? '\n' : ''}${rawLine}`;
@@ -619,6 +655,55 @@ const parseQuestions = (content: string) => {
   pushCurrent();
 
   return { questions };
+};
+
+const ROMAN_SUBPART_REGEX = '(?:ix|iv|v?i{0,3}|x)';
+
+const normalizeQuestionNumbersWithCarry = (
+  questions: ParsedQuestion[],
+  startingBaseNumber: string | null
+) => {
+  let latestBaseNumber = startingBaseNumber;
+
+  const normalizedQuestions = questions.map((question) => {
+    const rawNumber = String(question.questionNumber || '').trim();
+    if (!rawNumber) {
+      return question;
+    }
+
+    const withBaseMatch = rawNumber.match(
+      new RegExp(`(\\d+)\\s*(?:\\(?([a-z])\\)?)?\\s*(?:\\(?(${ROMAN_SUBPART_REGEX})\\)?)?`, 'i')
+    );
+    if (withBaseMatch?.[1]) {
+      latestBaseNumber = withBaseMatch[1];
+      return question;
+    }
+
+    const letterOnlyMatch = rawNumber.match(/^\(?([a-z])\)?$/i);
+    if (letterOnlyMatch && latestBaseNumber) {
+      const part = letterOnlyMatch[1].toLowerCase();
+      return {
+        ...question,
+        questionNumber: `${latestBaseNumber} (${part})`,
+      };
+    }
+
+    const letterAndRomanOnlyMatch = rawNumber.match(
+      new RegExp(`^\\(?([a-z])\\)?\\s*\\(?(${ROMAN_SUBPART_REGEX})\\)?$`, 'i')
+    );
+    if (letterAndRomanOnlyMatch && latestBaseNumber) {
+      const part = letterAndRomanOnlyMatch[1].toLowerCase();
+      const subpart = letterAndRomanOnlyMatch[2].toLowerCase();
+      return {
+        ...question,
+        questionNumber: `${latestBaseNumber} (${part})(${subpart})`,
+      };
+    }
+
+    return question;
+  });
+
+  return { questions: normalizedQuestions, latestBaseNumber };
 };
 
 type ParsedCriteria = {
@@ -1070,6 +1155,7 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
     let updatedCriteriaCount = 0;
     const missingCriteria: string[] = [];
     const imageResponseBodies: string[] = [];
+    let latestQuestionBaseNumber: string | null = null;
 
     if (examFile || examImageFiles.length) {
       if (overwrite) {
@@ -1102,12 +1188,14 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
           .join('\n\n');
 
         const { questions } = parseQuestions(examContent);
+        const normalized = normalizeQuestionNumbersWithCarry(questions, latestQuestionBaseNumber);
+        latestQuestionBaseNumber = normalized.latestBaseNumber;
 
-        if (!questions.length) {
+        if (!normalized.questions.length) {
           return NextResponse.json({ error: 'No questions parsed from ChatGPT response' }, { status: 500 });
         }
 
-        const insertPayload = questions.map((question) => {
+        const insertPayload = normalized.questions.map((question) => {
           const topic = question.topic || 'Unspecified';
           const isMcq = question.questionType === 'multiple_choice';
 
@@ -1300,11 +1388,14 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
           }
 
           const { questions } = parseQuestions(chunkContent);
-          if (!questions.length) {
+          const normalized = normalizeQuestionNumbersWithCarry(questions, latestQuestionBaseNumber);
+          latestQuestionBaseNumber = normalized.latestBaseNumber;
+
+          if (!normalized.questions.length) {
             continue;
           }
 
-          const insertPayload = questions.map((question) => {
+          const insertPayload = normalized.questions.map((question) => {
             const topic = question.topic || 'Unspecified';
             const isMcq = question.questionType === 'multiple_choice';
 

@@ -475,7 +475,11 @@ function HtmlSegment({ html }: { html: string }) {
       const wrapStandaloneVec = (input: string) => wrapStandaloneCommandOutsideMath(input, 'vec');
 
       const normalizeDisplayMath = (input: string) => {
-        return input.replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => {
+        const unescapedDelimiters = input
+          .replace(/\\{2,}\[/g, '\\[')
+          .replace(/\\{2,}\]/g, '\\]');
+
+        return unescapedDelimiters.replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => {
           const trimmed = inner.trim();
           return `$$${trimmed}$$`;
         });
@@ -590,10 +594,16 @@ function HtmlSegment({ html }: { html: string }) {
           (window as any).renderMathInElement(containerRef.current, {
             delimiters: [
               { left: '$$', right: '$$', display: true },
+              { left: '\\\\[', right: '\\\\]', display: true },
               { left: '\\[', right: '\\]', display: true },
+              { left: '\\\\(', right: '\\\\)', display: false },
               { left: '\\(', right: '\\)', display: false },
               { left: '$', right: '$', display: false },
             ],
+            macros: {
+              '\\undertilde': '\\underset{\\sim}{#1}',
+              '\\utilde': '\\underset{\\sim}{#1}',
+            },
             throwOnError: false,
             ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
           });
