@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     // Fetch messages for this user
     const { data, error } = await supabaseAdmin
       .from('chat_messages')
-      .select('*')
+      .select('id, user_id, message, role, attachment, file_name, created_at')
       .eq('user_id', decoded.userId)
       .order('created_at', { ascending: true });
 
