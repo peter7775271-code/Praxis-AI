@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { X } from 'lucide-react';
-import { YEARS, SUBJECTS_BY_YEAR, CURRENT_EXAM_YEAR, MIN_EXAM_YEAR, getPaperKey } from '../syllabus-config';
+import { BROWSE_YEARS as YEARS, SUBJECTS_BY_YEAR, CURRENT_EXAM_YEAR, MIN_EXAM_YEAR, getPaperKey } from '../syllabus-config';
 
 interface Props {
   [key: string]: any;
