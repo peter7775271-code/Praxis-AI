@@ -4,6 +4,7 @@
 import React from 'react';
 import {
   Send, Upload, ArrowLeft, BookOpen, ChevronRight, ChevronLeft, RefreshCw,
+  Pencil, Eraser,
   Eye, Download, Bookmark, CheckCircle2, XCircle, TrendingUp, Edit2, Timer, Info
 } from 'lucide-react';
 import { LatexText, QuestionTextWithDividers } from '../question-text-with-dividers';
@@ -28,6 +29,31 @@ export default function PaperView({
   awardedMarks, maxMarks, isMultipleChoiceReview, isMarking, examTimeRemainingLabel,
   paperDisplayGroups,
 }: Props) {
+  const [drawTool, setDrawTool] = React.useState<'pen' | 'eraser'>('pen');
+  const applyDrawToolToApi = React.useCallback((api: any, nextTool: 'pen' | 'eraser') => {
+    if (nextTool === 'eraser') {
+      api.setActiveTool({ type: 'eraser' });
+      return;
+    }
+
+    api.setActiveTool({ type: 'freedraw' });
+    api.updateScene({
+      appState: {
+        currentItemStrokeWidth: 1,
+      },
+    });
+  }, []);
+
+  React.useEffect(() => {
+    const api = excalidrawApiRef?.current;
+    if (!api) return;
+    applyDrawToolToApi(api, drawTool);
+  }, [drawTool, excalidrawApiRef, applyDrawToolToApi]);
+
+  React.useEffect(() => {
+    setDrawTool('pen');
+  }, [question?.id]);
+
   return (
                 <>
                   {/* Exam Review Mode: one question at a time */}
@@ -916,7 +942,7 @@ export default function PaperView({
                           </div>
                           {/* Excalidraw answer area (toolbar and controls handled by Excalidraw itself) */}
                           <div
-                            className="rounded-xl bg-white border border-neutral-100"
+                            className="minimal-excalidraw-shell rounded-xl bg-white border border-neutral-100"
                             style={{ touchAction: 'none' }}
                             onTouchMove={(e) => {
                               if (isIpad && e.touches.length < 2) {
@@ -931,13 +957,35 @@ export default function PaperView({
                             >
                               <Excalidraw
                                 theme="light"
+                                UIOptions={{
+                                  canvasActions: {
+                                    changeViewBackgroundColor: false,
+                                    clearCanvas: false,
+                                    export: false,
+                                    loadScene: false,
+                                    saveToActiveFile: false,
+                                    saveAsImage: false,
+                                    toggleTheme: false,
+                                  },
+                                  tools: {
+                                    image: false,
+                                  },
+                                  welcomeScreen: false,
+                                }}
                                 initialData={{
                                   appState: {
                                     currentItemStrokeWidth: 1,
+                                    activeTool: {
+                                      type: 'freedraw',
+                                    },
                                   },
                                 }}
                                 excalidrawAPI={(api) => {
                                   excalidrawApiRef.current = api;
+                                  requestAnimationFrame(() => {
+                                    if (excalidrawApiRef.current !== api) return;
+                                    applyDrawToolToApi(api, drawTool);
+                                  });
                                 }}
                                 onChange={(
                                   elements: readonly ExcalidrawElement[],
@@ -959,7 +1007,30 @@ export default function PaperView({
                       {/* Canvas Controls: Upload + Submit (below answer area) */}
                       {appState === 'idle' && question?.question_type !== 'multiple_choice' && (
                         <div className="flex flex-col sm:flex-row gap-3">
-                          <div className="flex gap-2 sm:ml-auto">
+                          <div className="flex flex-wrap gap-2 sm:ml-auto">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDrawTool((prev) => {
+                                  const next = prev === 'pen' ? 'eraser' : 'pen';
+                                  const api = excalidrawApiRef?.current;
+                                  if (api) {
+                                    applyDrawToolToApi(api, next);
+                                  }
+                                  return next;
+                                });
+                              }}
+                              className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition cursor-pointer text-sm"
+                              style={{
+                                backgroundColor: drawTool === 'eraser' ? 'var(--clr-btn-danger)' : 'var(--clr-surface-a20)',
+                                color: drawTool === 'eraser' ? 'var(--clr-btn-danger-text)' : 'var(--clr-primary-a50)',
+                                border: drawTool === 'eraser' ? '1px solid var(--clr-btn-danger-hover)' : '1px solid var(--clr-surface-tonal-a20)',
+                              }}
+                            >
+                              {drawTool === 'eraser' ? <Eraser className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
+                              <span>{drawTool === 'eraser' ? 'Eraser On' : 'Pen On'}</span>
+                            </button>
+
                             <label
                               className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition cursor-pointer text-sm"
                               style={{

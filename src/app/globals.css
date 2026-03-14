@@ -468,3 +468,13 @@ body {
   text-align: left;
   vertical-align: top;
 }
+
+/* Minimal Excalidraw in paper answer area */
+.minimal-excalidraw-shell .excalidraw .App-bottom-bar,
+.minimal-excalidraw-shell .excalidraw .App-menu__left,
+.minimal-excalidraw-shell .excalidraw .main-menu-trigger,
+.minimal-excalidraw-shell .excalidraw .mobile-misc-tools-container,
+.minimal-excalidraw-shell .excalidraw .help-icon,
+.minimal-excalidraw-shell .excalidraw .layer-ui__wrapper__top-right {
+  display: none !important;
+}
