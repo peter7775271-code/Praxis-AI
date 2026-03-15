@@ -108,6 +108,7 @@ import SavedView from './saved/SavedView';
 import SettingsView from './settings/SettingsView';
 import LogsView from './logs/LogsView';
 import DevQuestionsView from './dev-questions/DevQuestionsView';
+import CustomExamView from './exam/CustomExamView';
 
 const Excalidraw = dynamic(
   async () => {
@@ -117,6 +118,8 @@ const Excalidraw = dynamic(
   { ssr: false }
 );
 // TikzRenderer no longer used in this page
+
+const CUSTOM_EXAM_STORAGE_KEY = 'currentCustomExam';
 
 const pad2 = (value: number) => String(value).padStart(2, '0');
 
@@ -4207,12 +4210,18 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       localStorage.setItem('savedAttempts', JSON.stringify(existing));
       setSavedAttempts(existing);
 
-      setActivePaper({ year: 'Custom', subject: params.subject, grade: params.grade, school: 'Custom', count: finalSelectionWithSharedImages.length });
+      const customPaper = { year: 'Custom', subject: params.subject, grade: params.grade, school: 'Custom', count: finalSelectionWithSharedImages.length };
+      localStorage.setItem(CUSTOM_EXAM_STORAGE_KEY, JSON.stringify({
+        activePaper: customPaper,
+        questions: finalSelectionWithSharedImages,
+        createdAt: new Date().toISOString(),
+      }));
+
+      setActivePaper(customPaper);
       setPaperQuestions(finalSelectionWithSharedImages);
       setPaperIndex(0);
-      setViewMode('paper');
-      const initialGroup = getDisplayGroupAt(finalSelectionWithSharedImages, 0);
-      resetForQuestion(mergeGroupForDisplay(initialGroup.group));
+      setViewMode('exam');
+      router.push('/dashboard/exam');
       if (params.cognitive) {
         startExamSimulation(params.subject);
       }
@@ -4255,6 +4264,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
   // Initial load
   useEffect(() => {
+    if (initialViewMode === 'exam') return;
+
     const loadInitialQuestion = async () => {
       try {
         setLoading(true);
@@ -4279,6 +4290,31 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
     loadInitialQuestion();
   }, []);
+
+  useEffect(() => {
+    if (initialViewMode !== 'exam') return;
+
+    try {
+      const raw = localStorage.getItem(CUSTOM_EXAM_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const storedQuestions = Array.isArray(parsed?.questions) ? parsed.questions as Question[] : [];
+      if (!storedQuestions.length) return;
+
+      setActivePaper(parsed?.activePaper ?? {
+        year: 'Custom',
+        subject: storedQuestions[0]?.subject || 'Custom Exam',
+        grade: storedQuestions[0]?.grade || '',
+        school: 'Custom',
+        count: storedQuestions.length,
+      });
+      setPaperQuestions(storedQuestions);
+      setPaperIndex(0);
+      setViewMode('exam');
+    } catch (err) {
+      console.error('Failed to restore custom exam:', err);
+    }
+  }, [initialViewMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -4371,7 +4407,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
   }, [examRemainingMs]);
 
-  const viewModeLabel = viewMode === 'dashboard' ? 'Dashboard' : viewMode === 'analytics' ? 'Analytics Hub' : viewMode === 'browse' ? 'Browse Bank' : viewMode === 'builder' ? 'Exam Architect' : viewMode === 'formulas' ? 'Formula Vault' : viewMode === 'saved' ? 'Saved Content' : viewMode === 'history' ? 'My History' : viewMode === 'syllabus' ? 'Syllabus' : viewMode === 'papers' || viewMode === 'paper' ? 'Exam' : viewMode === 'settings' ? 'Settings' : viewMode === 'dev-questions' ? 'Dev Mode' : viewMode === 'logs' ? 'Upload Logs' : String(viewMode).replace(/-/g, ' ');
+  const viewModeLabel = viewMode === 'dashboard' ? 'Dashboard' : viewMode === 'analytics' ? 'Analytics Hub' : viewMode === 'browse' ? 'Browse Bank' : viewMode === 'builder' ? 'Exam Architect' : viewMode === 'exam' ? 'Custom Exam' : viewMode === 'formulas' ? 'Formula Vault' : viewMode === 'saved' ? 'Saved Content' : viewMode === 'history' ? 'My History' : viewMode === 'syllabus' ? 'Syllabus' : viewMode === 'papers' || viewMode === 'paper' ? 'Exam' : viewMode === 'settings' ? 'Settings' : viewMode === 'dev-questions' ? 'Dev Mode' : viewMode === 'logs' ? 'Upload Logs' : String(viewMode).replace(/-/g, ' ');
   const paperDisplayGroups = useMemo(() => {
     const groups: Array<{ startIndex: number; endIndex: number; label: string }> = [];
     if (!paperQuestions.length) return groups;
@@ -4556,7 +4592,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
             </div>
           </header>
           <div ref={mainContentScrollRef} className={`flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar z-10 relative ${viewMode === 'paper' && showPaperQuestionNavigator ? 'lg:pr-[22rem]' : ''}`}>
-            <div className={`${viewMode === 'paper' ? 'max-w-[68rem] mx-auto w-full space-y-8 lg:translate-x-2' : 'max-w-5xl mx-auto space-y-8'}`}>
+            <div className={`${viewMode === 'paper' ? 'max-w-[68rem] mx-auto w-full space-y-8 lg:translate-x-2' : viewMode === 'exam' ? 'max-w-6xl mx-auto w-full space-y-8' : 'max-w-5xl mx-auto space-y-8'}`}>
               {viewMode === 'dashboard' && (
                 <DashboardView
                   setViewMode={setViewMode}
@@ -4597,6 +4633,17 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                 <ExamBuilderView
                   onInitializeExam={initializeCustomExam}
                   isInitializing={isInitializingExam}
+                />
+              )}
+              {viewMode === 'exam' && (
+                <CustomExamView
+                  examTitle={activePaper?.subject || 'Custom Exam'}
+                  examMeta={activePaper ? `${activePaper.grade} • ${activePaper.count} questions` : null}
+                  questions={paperQuestions}
+                  onBack={() => {
+                    setViewMode('builder');
+                    router.push('/dashboard/builder');
+                  }}
                 />
               )}
               {viewMode === 'formulas' && <FormulaVaultView setViewMode={setViewMode} />}
