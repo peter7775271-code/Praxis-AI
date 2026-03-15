@@ -4,6 +4,7 @@ import { constants } from 'fs';
 import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
+import { supabaseAdmin } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
@@ -175,7 +176,47 @@ const normalizeLatexBody = (value: string) =>
     .replace(/Δ/g, '\\ensuremath{\\Delta}')
     .replace(/Σ/g, '\\ensuremath{\\Sigma}')
     .replace(/Ω/g, '\\ensuremath{\\Omega}')
-    .replace(/√/g, '\\ensuremath{\\sqrt{}}')
+    .replace(/√/g, '\\ensuremath{\\surd}')
+    .replace(/°/g, '\\ensuremath{^{\\circ}}')
+    .replace(/±/g, '\\ensuremath{\\pm}')
+    .replace(/∞/g, '\\ensuremath{\\infty}')
+    .replace(/−/g, '\\ensuremath{-}')
+    .replace(/′/g, '\\ensuremath{^{\\prime}}')
+    .replace(/″/g, '\\ensuremath{^{\\prime\\prime}}')
+    .replace(/…/g, '\\ldots{}')
+    .replace(/—/g, '---')
+    .replace(/–/g, '--')
+    .replace(/\u201C/g, '``')
+    .replace(/\u201D/g, "''")
+    .replace(/\u2018/g, '`')
+    .replace(/\u2019/g, "'")
+    .replace(/•/g, '\\textbullet{}')
+    .replace(/∈/g, '\\ensuremath{\\in}')
+    .replace(/∴/g, '\\ensuremath{\\therefore}')
+    .replace(/⊥/g, '\\ensuremath{\\perp}')
+    .replace(/∥/g, '\\ensuremath{\\parallel}')
+    .replace(/²/g, '\\ensuremath{^{2}}')
+    .replace(/³/g, '\\ensuremath{^{3}}')
+    .replace(/¹/g, '\\ensuremath{^{1}}')
+    .replace(/½/g, '\\ensuremath{\\frac{1}{2}}')
+    .replace(/¼/g, '\\ensuremath{\\frac{1}{4}}')
+    .replace(/¾/g, '\\ensuremath{\\frac{3}{4}}')
+    .replace(/∑/g, '\\ensuremath{\\sum}')
+    .replace(/∫/g, '\\ensuremath{\\int}')
+    .replace(/∂/g, '\\ensuremath{\\partial}')
+    .replace(/∇/g, '\\ensuremath{\\nabla}')
+    .replace(/⊂/g, '\\ensuremath{\\subset}')
+    .replace(/⊃/g, '\\ensuremath{\\supset}')
+    .replace(/⊆/g, '\\ensuremath{\\subseteq}')
+    .replace(/⊇/g, '\\ensuremath{\\supseteq}')
+    .replace(/∪/g, '\\ensuremath{\\cup}')
+    .replace(/∩/g, '\\ensuremath{\\cap}')
+    .replace(/∅/g, '\\ensuremath{\\emptyset}')
+    .replace(/∀/g, '\\ensuremath{\\forall}')
+    .replace(/∃/g, '\\ensuremath{\\exists}')
+    .replace(/¬/g, '\\ensuremath{\\neg}')
+    .replace(/∧/g, '\\ensuremath{\\land}')
+    .replace(/∨/g, '\\ensuremath{\\lor}')
     .trim()
   );
 
@@ -898,6 +939,7 @@ const buildExamLatex = ({
 \\usepackage[final]{graphicx}
 \\usepackage{enumitem}
 \\usepackage{xcolor}
+\\usepackage{textcomp}
 \\usepackage[strings]{underscore}
 \\setkeys{Gin}{draft=false}
 \\DeclareMathOperator{\\cosec}{cosec}
@@ -925,6 +967,42 @@ const buildExamLatex = ({
 \\DeclareUnicodeCharacter{0394}{\\ensuremath{\\Delta}}
 \\DeclareUnicodeCharacter{03A3}{\\ensuremath{\\Sigma}}
 \\DeclareUnicodeCharacter{03A9}{\\ensuremath{\\Omega}}
+\\DeclareUnicodeCharacter{221A}{\\ensuremath{\\surd}}
+\\DeclareUnicodeCharacter{00B0}{\\ensuremath{^{\\circ}}}
+\\DeclareUnicodeCharacter{00B1}{\\ensuremath{\\pm}}
+\\DeclareUnicodeCharacter{221E}{\\ensuremath{\\infty}}
+\\DeclareUnicodeCharacter{2032}{\\ensuremath{^{\\prime}}}
+\\DeclareUnicodeCharacter{2033}{\\ensuremath{^{\\prime\\prime}}}
+\\DeclareUnicodeCharacter{2026}{\\ldots}
+\\DeclareUnicodeCharacter{2014}{---}
+\\DeclareUnicodeCharacter{2013}{--}
+\\DeclareUnicodeCharacter{2022}{\\textbullet}
+\\DeclareUnicodeCharacter{2208}{\\ensuremath{\\in}}
+\\DeclareUnicodeCharacter{2234}{\\ensuremath{\\therefore}}
+\\DeclareUnicodeCharacter{22A5}{\\ensuremath{\\perp}}
+\\DeclareUnicodeCharacter{2225}{\\ensuremath{\\parallel}}
+\\DeclareUnicodeCharacter{00B2}{\\ensuremath{^{2}}}
+\\DeclareUnicodeCharacter{00B3}{\\ensuremath{^{3}}}
+\\DeclareUnicodeCharacter{00B9}{\\ensuremath{^{1}}}
+\\DeclareUnicodeCharacter{00BD}{\\ensuremath{\\frac{1}{2}}}
+\\DeclareUnicodeCharacter{00BC}{\\ensuremath{\\frac{1}{4}}}
+\\DeclareUnicodeCharacter{00BE}{\\ensuremath{\\frac{3}{4}}}
+\\DeclareUnicodeCharacter{2211}{\\ensuremath{\\sum}}
+\\DeclareUnicodeCharacter{222B}{\\ensuremath{\\int}}
+\\DeclareUnicodeCharacter{2202}{\\ensuremath{\\partial}}
+\\DeclareUnicodeCharacter{2207}{\\ensuremath{\\nabla}}
+\\DeclareUnicodeCharacter{2282}{\\ensuremath{\\subset}}
+\\DeclareUnicodeCharacter{2283}{\\ensuremath{\\supset}}
+\\DeclareUnicodeCharacter{2286}{\\ensuremath{\\subseteq}}
+\\DeclareUnicodeCharacter{2287}{\\ensuremath{\\supseteq}}
+\\DeclareUnicodeCharacter{222A}{\\ensuremath{\\cup}}
+\\DeclareUnicodeCharacter{2229}{\\ensuremath{\\cap}}
+\\DeclareUnicodeCharacter{2205}{\\ensuremath{\\emptyset}}
+\\DeclareUnicodeCharacter{2200}{\\ensuremath{\\forall}}
+\\DeclareUnicodeCharacter{2203}{\\ensuremath{\\exists}}
+\\DeclareUnicodeCharacter{00AC}{\\ensuremath{\\neg}}
+\\DeclareUnicodeCharacter{2227}{\\ensuremath{\\land}}
+\\DeclareUnicodeCharacter{2228}{\\ensuremath{\\lor}}
 \\setlength{\\parskip}{0.6em}
 \\setlength{\\parindent}{0pt}
 
@@ -1374,5 +1452,241 @@ export async function POST(request: Request) {
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true });
     }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  GET  /api/hsc/export-exam-pdf                                     */
+/*  Diagnostic endpoint: fetch questions from the database, build     */
+/*  LaTeX in all three modes, and report whether each mode succeeded. */
+/* ------------------------------------------------------------------ */
+
+const DIAG_SAMPLE_SIZE = 20;
+
+const countUnbalancedBraces = (value: string) => {
+  let open = 0;
+  const chars = Array.from(value);
+  for (let i = 0; i < chars.length; i += 1) {
+    if (isEscapedAt(chars, i)) continue;
+    if (chars[i] === '{') open += 1;
+    if (chars[i] === '}') open -= 1;
+  }
+  return open;
+};
+
+const HANDLED_UNICODE_CODEPOINTS = new Set([
+  0x2220, 0x2264, 0x2265, 0x2260, 0x21D2, 0x2192, 0x2194, 0x00D7, 0x00F7,
+  0x03C0, 0x03B1, 0x03B2, 0x03B3, 0x03B4, 0x03B8, 0x03BB, 0x03BC, 0x03C3,
+  0x03C6, 0x03C9, 0x0394, 0x03A3, 0x03A9, 0x221A, 0x2212, 0x221E, 0x2032,
+  0x2033, 0x2026, 0x2014, 0x2013, 0x201C, 0x201D, 0x2018, 0x2019, 0x2022,
+  0x2208, 0x2234, 0x22A5, 0x2225, 0x2211, 0x222B, 0x2202, 0x2207, 0x2282,
+  0x2283, 0x2286, 0x2287, 0x222A, 0x2229, 0x2205, 0x2200, 0x2203, 0x2227,
+  0x2228, 0x00B0, 0x00B1, 0x00B2, 0x00B3, 0x00B9, 0x00AC, 0x00BD, 0x00BC,
+  0x00BE,
+]);
+
+const detectProblematicUnicode = (value: string) => {
+  // Match characters outside Basic Latin, Latin-1 Supplement, and common LaTeX-safe ranges
+  // that are NOT already handled by our normalizeLatexBody replacements.
+  const suspicious: Array<{ char: string; code: string; position: number }> = [];
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.codePointAt(i);
+    if (code === undefined) continue;
+    // Skip ASCII, Latin-1 Supplement (handled by T1 encoding), and common whitespace
+    if (code <= 0x00FF) continue;
+    // Skip characters that our normalizeLatexBody already handles
+    if (HANDLED_UNICODE_CODEPOINTS.has(code)) continue;
+    suspicious.push({ char: value[i], code: `U+${code.toString(16).toUpperCase().padStart(4, '0')}`, position: i });
+    // For surrogate pairs
+    if (code > 0xFFFF) i += 1;
+  }
+  return suspicious;
+};
+
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const limit = Math.min(Math.max(Number(searchParams.get('limit') || DIAG_SAMPLE_SIZE), 1), 100);
+    const questionType = searchParams.get('type') || null;
+    const grade = searchParams.get('grade') || null;
+    const subject = searchParams.get('subject') || null;
+
+    // 1. Fetch sample questions from database
+    let query = supabaseAdmin
+      .from('hsc_questions')
+      .select('id, question_number, question_text, question_type, marks, topic, subject, grade, year, sample_answer, marking_criteria, mcq_option_a, mcq_option_b, mcq_option_c, mcq_option_d, mcq_correct_answer, mcq_explanation, graph_image_data, graph_image_size, sample_answer_image, sample_answer_image_size')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (questionType) query = query.eq('question_type', questionType);
+    if (grade) query = query.eq('grade', grade);
+    if (subject) query = query.eq('subject', subject);
+
+    const { data: questions, error: dbError } = await query;
+
+    if (dbError) {
+      return Response.json(
+        { error: 'Database query failed', details: dbError.message },
+        { status: 500 }
+      );
+    }
+
+    if (!questions || questions.length === 0) {
+      return Response.json(
+        { error: 'No questions found in database', hint: 'Check that hsc_questions table has data and DATABASE_URL is set.' },
+        { status: 404 }
+      );
+    }
+
+    // 2. Build LaTeX in three modes and collect diagnostics
+    const diagResults: Array<{
+      id: string;
+      question_number: string | null;
+      subject: string | null;
+      topic: string | null;
+      modes: Record<string, { success: boolean; error?: string; texLength?: number }>;
+      warnings: string[];
+    }> = [];
+
+    const castQuestions = questions as ExportQuestion[];
+
+    for (const question of castQuestions) {
+      const entry: (typeof diagResults)[number] = {
+        id: String((question as Record<string, unknown>).id || ''),
+        question_number: question.question_number ?? null,
+        subject: (question as Record<string, unknown>).subject as string | null,
+        topic: question.topic ?? null,
+        modes: {},
+        warnings: [],
+      };
+
+      // Check raw text for issues
+      const rawText = String(question.question_text || '');
+      const rawAnswer = String(question.sample_answer || '');
+      const combinedRaw = `${rawText}\n${rawAnswer}`;
+
+      const problematicChars = detectProblematicUnicode(combinedRaw);
+      if (problematicChars.length > 0) {
+        const sample = problematicChars.slice(0, 5).map((c) => `${c.char} (${c.code})`).join(', ');
+        entry.warnings.push(`Found ${problematicChars.length} potentially problematic Unicode char(s): ${sample}`);
+      }
+
+      // Test each mode
+      const modes: Array<{ name: string; compileSafeMode: boolean; plainTextMode: boolean }> = [
+        { name: 'normal', compileSafeMode: false, plainTextMode: false },
+        { name: 'safe', compileSafeMode: true, plainTextMode: false },
+        { name: 'plainText', compileSafeMode: true, plainTextMode: true },
+      ];
+
+      for (const mode of modes) {
+        try {
+          const tex = buildExamLatex({
+            title: 'Diagnostic Test',
+            subtitle: `Question ${question.question_number || 'unknown'}`,
+            includeSolutions: true,
+            questions: [question],
+            compileSafeMode: mode.compileSafeMode,
+            plainTextMode: mode.plainTextMode,
+          });
+
+          const braceBalance = countUnbalancedBraces(tex);
+          if (braceBalance !== 0) {
+            entry.warnings.push(`[${mode.name}] Unbalanced braces: ${braceBalance > 0 ? `${braceBalance} unclosed` : `${-braceBalance} extra closing`}`);
+          }
+
+          entry.modes[mode.name] = { success: true, texLength: tex.length };
+        } catch (err) {
+          entry.modes[mode.name] = {
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }
+
+      diagResults.push(entry);
+    }
+
+    // 3. Try building a full exam with all questions
+    let fullExamDiag: { success: boolean; texLength?: number; error?: string; braceBalance?: number } = { success: false };
+    try {
+      const fullTex = buildExamLatex({
+        title: 'Full Diagnostic Exam',
+        subtitle: `${questions.length} questions from database`,
+        includeSolutions: true,
+        questions: castQuestions,
+      });
+      const braceBalance = countUnbalancedBraces(fullTex);
+      fullExamDiag = { success: true, texLength: fullTex.length, braceBalance };
+    } catch (err) {
+      fullExamDiag = { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    // 4. Optionally compile if pdflatex is available
+    const compileTest: { available: boolean; success?: boolean; error?: string } = { available: false };
+    try {
+      await access(PDFLATEX_PATH, constants.X_OK);
+      compileTest.available = true;
+
+      // Only compile if requested (to avoid slow diagnostic calls)
+      if (searchParams.get('compile') === 'true') {
+        let compileTempDir: string | undefined;
+        try {
+          compileTempDir = await mkdtemp(path.join(os.tmpdir(), 'diag-exam-'));
+          const texPath = path.join(compileTempDir, LOCAL_TEX_FILENAME);
+          const tex = buildExamLatex({
+            title: 'Compile Test',
+            subtitle: `${questions.length} questions`,
+            includeSolutions: false,
+            questions: castQuestions,
+          });
+          await writeFile(texPath, tex, 'utf8');
+          await execFileAsync(PDFLATEX_PATH, [
+            '-interaction=nonstopmode',
+            '-file-line-error',
+            '-halt-on-error',
+            '-output-directory',
+            compileTempDir,
+            LOCAL_TEX_FILENAME,
+          ], { cwd: compileTempDir, timeout: PDF_COMPILE_TIMEOUT_MS });
+          compileTest.success = true;
+        } catch (compileErr) {
+          compileTest.success = false;
+          compileTest.error = compileErr instanceof Error ? compileErr.message : String(compileErr);
+        } finally {
+          if (compileTempDir) {
+            await rm(compileTempDir, { recursive: true, force: true });
+          }
+        }
+      }
+    } catch {
+      compileTest.available = false;
+    }
+
+    // 5. Summary stats
+    const totalQuestions = diagResults.length;
+    const allNormalOk = diagResults.every((r) => r.modes.normal?.success);
+    const allSafeOk = diagResults.every((r) => r.modes.safe?.success);
+    const allPlainOk = diagResults.every((r) => r.modes.plainText?.success);
+    const questionsWithWarnings = diagResults.filter((r) => r.warnings.length > 0);
+
+    return Response.json({
+      summary: {
+        questionsAnalyzed: totalQuestions,
+        allNormalModeOk: allNormalOk,
+        allSafeModeOk: allSafeOk,
+        allPlainTextModeOk: allPlainOk,
+        questionsWithWarnings: questionsWithWarnings.length,
+        fullExamBuild: fullExamDiag,
+        pdflatex: compileTest,
+      },
+      questions: diagResults,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[export-exam-pdf-diag] Error:', message);
+    return Response.json(
+      { error: 'Diagnostic failed', details: message },
+      { status: 500 }
+    );
   }
 }
