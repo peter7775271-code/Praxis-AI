@@ -234,6 +234,20 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     return normalized === 'true' || normalized === '1' || normalized === 't';
   };
 
+  const isStoredQuestion = (value: unknown): value is Question => {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Partial<Question>;
+    return (
+      typeof candidate.id === 'string' &&
+      typeof candidate.grade === 'string' &&
+      typeof candidate.year === 'number' &&
+      typeof candidate.subject === 'string' &&
+      typeof candidate.topic === 'string' &&
+      typeof candidate.marks === 'number' &&
+      typeof candidate.question_text === 'string'
+    );
+  };
+
   const fetchWithTimeout = async (url: string, timeoutMs = 10000) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(
@@ -4220,11 +4234,10 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       setActivePaper(customPaper);
       setPaperQuestions(finalSelectionWithSharedImages);
       setPaperIndex(0);
-      setViewMode('exam');
-      router.push('/dashboard/exam');
       if (params.cognitive) {
         startExamSimulation(params.subject);
       }
+      router.push('/dashboard/exam');
       return { ok: true };
     } catch (err) {
       console.error('Failed to initialize custom exam:', err);
@@ -4289,7 +4302,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     };
 
     loadInitialQuestion();
-  }, []);
+  }, [initialViewMode]);
 
   useEffect(() => {
     if (initialViewMode !== 'exam') return;
@@ -4298,7 +4311,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       const raw = localStorage.getItem(CUSTOM_EXAM_STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
-      const storedQuestions = Array.isArray(parsed?.questions) ? parsed.questions as Question[] : [];
+      const storedQuestions = Array.isArray(parsed?.questions) ? parsed.questions.filter(isStoredQuestion) : [];
       if (!storedQuestions.length) return;
 
       setActivePaper(parsed?.activePaper ?? {

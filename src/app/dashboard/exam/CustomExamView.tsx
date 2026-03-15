@@ -5,6 +5,17 @@ import { ArrowLeft, BookOpen, Eye, EyeOff } from 'lucide-react';
 import { LatexText, QuestionTextWithDividers } from '../question-text-with-dividers';
 import { stripOuterBraces } from '../view-helpers';
 
+const DEFAULT_EXAM_SOURCE_LABEL = 'HSC';
+
+const getMcqOptions = (question: CustomExamQuestion) => (
+  [
+    { label: 'A' as const, text: stripOuterBraces(question.mcq_option_a || ''), image: question.mcq_option_a_image || null },
+    { label: 'B' as const, text: stripOuterBraces(question.mcq_option_b || ''), image: question.mcq_option_b_image || null },
+    { label: 'C' as const, text: stripOuterBraces(question.mcq_option_c || ''), image: question.mcq_option_c_image || null },
+    { label: 'D' as const, text: stripOuterBraces(question.mcq_option_d || ''), image: question.mcq_option_d_image || null },
+  ].filter((option) => option.text || option.image)
+);
+
 type CustomExamQuestion = {
   id: string;
   question_number?: string | null;
@@ -100,15 +111,10 @@ export default function CustomExamView({
         <div className="space-y-8">
           {questions.map((question, index) => {
             const isMcq = question.question_type === 'multiple_choice';
-            const options = [
-              { label: 'A' as const, text: stripOuterBraces(question.mcq_option_a || ''), image: question.mcq_option_a_image || null },
-              { label: 'B' as const, text: stripOuterBraces(question.mcq_option_b || ''), image: question.mcq_option_b_image || null },
-              { label: 'C' as const, text: stripOuterBraces(question.mcq_option_c || ''), image: question.mcq_option_c_image || null },
-              { label: 'D' as const, text: stripOuterBraces(question.mcq_option_d || ''), image: question.mcq_option_d_image || null },
-            ].filter((option) => option.text || option.image);
+            const options = getMcqOptions(question);
 
             return (
-              <section key={`${question.id}-${index}`} className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm md:p-8">
+              <section key={question.id} className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm md:p-8">
                 <div className="flex flex-col gap-4 border-b border-neutral-100 pb-6 md:flex-row md:items-start md:justify-between">
                   <div className="space-y-2">
                     <p className="text-xs font-bold uppercase tracking-[0.3em] text-neutral-400">
@@ -124,7 +130,7 @@ export default function CustomExamView({
                   </div>
                   <div className="text-sm text-neutral-500 md:text-right">
                     <p className="font-semibold text-neutral-700">{question.subject}</p>
-                    <p>{question.year} {question.school_name || 'HSC'}</p>
+                    <p>{question.year} {question.school_name || DEFAULT_EXAM_SOURCE_LABEL}</p>
                   </div>
                 </div>
 
