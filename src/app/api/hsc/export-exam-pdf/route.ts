@@ -1496,7 +1496,7 @@ const detectProblematicUnicode = (value: string) => {
     if (code <= 0x00FF) continue;
     // Skip characters that our normalizeLatexBody already handles
     if (HANDLED_UNICODE_CODEPOINTS.has(code)) continue;
-    suspicious.push({ char: value[i], code: `U+${code.toString(16).toUpperCase().padStart(4, '0')}`, position: i });
+    suspicious.push({ char: value.slice(i, i + (code > 0xFFFF ? 2 : 1)), code: `U+${code.toString(16).toUpperCase().padStart(4, '0')}`, position: i });
     // For surrogate pairs
     if (code > 0xFFFF) i += 1;
   }
@@ -1506,7 +1506,8 @@ const detectProblematicUnicode = (value: string) => {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const limit = Math.min(Math.max(Number(searchParams.get('limit') || DIAG_SAMPLE_SIZE), 1), 100);
+    const rawLimit = Number.parseInt(searchParams.get('limit') || String(DIAG_SAMPLE_SIZE), 10);
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : DIAG_SAMPLE_SIZE, 1), 100);
     const questionType = searchParams.get('type') || null;
     const grade = searchParams.get('grade') || null;
     const subject = searchParams.get('subject') || null;
