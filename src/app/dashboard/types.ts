@@ -3,6 +3,7 @@ export type DashboardViewMode =
   | 'analytics'
   | 'browse'
   | 'builder'
+  | 'exam'
   | 'formulas'
   | 'saved'
   | 'history'
