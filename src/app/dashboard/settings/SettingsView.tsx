@@ -99,13 +99,15 @@ export default function SettingsView({
                         </div>
                       </div>
 
-                      <div
-                        className="p-6 rounded-2xl border mt-6"
-                        style={{
-                          backgroundColor: 'var(--clr-surface-a10)',
-                          borderColor: 'var(--clr-surface-tonal-a20)',
-                        }}
-                      >
+                      {isDevMode && (
+                        <>
+                        <div
+                          className="p-6 rounded-2xl border mt-6"
+                          style={{
+                            backgroundColor: 'var(--clr-surface-a10)',
+                            borderColor: 'var(--clr-surface-tonal-a20)',
+                          }}
+                        >
                         <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--clr-primary-a50)' }}>Syllabus Dot Point Mapping</h2>
                         <p className="text-sm mb-4" style={{ color: 'var(--clr-surface-a40)' }}>
                           Select an exam paper and map each question using your custom classify → specialist ChatGPT syllabus workflow.
@@ -370,15 +372,15 @@ export default function SettingsView({
                             </div>
                           )}
                         </div>
-                      </div>
+                        </div>
 
-                      <div
-                        className="p-6 rounded-2xl border mt-6"
-                        style={{
-                          backgroundColor: 'var(--clr-surface-a10)',
-                          borderColor: 'var(--clr-surface-tonal-a20)',
-                        }}
-                      >
+                        <div
+                          className="p-6 rounded-2xl border mt-6"
+                          style={{
+                            backgroundColor: 'var(--clr-surface-a10)',
+                            borderColor: 'var(--clr-surface-tonal-a20)',
+                          }}
+                        >
                         <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--clr-primary-a50)' }}>Syllabus Import</h2>
                         <p className="text-sm mb-4" style={{ color: 'var(--clr-surface-a40)' }}>
                           Paste syllabus dot points to populate the taxonomy database. Use the format below.
@@ -490,7 +492,9 @@ POINT_1 ...`}
                             )}
                           </div>
                         </div>
-                      </div>
+                        </div>
+                        </>
+                      )}
 
                       {isDevMode && (
                         <div
