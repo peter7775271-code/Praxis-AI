@@ -7,7 +7,7 @@ import {
   GraduationCap,
   History,
   LineChart,
-  Map,
+  Map as MapIcon,
   Plus,
   PlusCircle,
   RefreshCw,
@@ -653,7 +653,7 @@ export function ExamBuilderView({
                 title="Browse syllabus and restrict by subtopic / dot point"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all hover:bg-neutral-100 border border-neutral-200 text-neutral-500 hover:text-neutral-800"
               >
-                <Map size={12} />
+                <MapIcon size={12} />
                 <span>Mindmap</span>
                 {(mindmapSelection.subtopics.length > 0 || mindmapSelection.dotPoints.length > 0) && (
                   <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#b5a45d] text-white text-[9px] font-bold">
