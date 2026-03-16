@@ -7,6 +7,8 @@ import {
   GraduationCap,
   History,
   LineChart,
+  Map,
+  Plus,
   PlusCircle,
   RefreshCw,
   SlidersHorizontal,
@@ -16,6 +18,7 @@ import {
   Trophy,
   Zap,
 } from 'lucide-react';
+import SyllabusMindmapModal, { type MindmapSelection } from './SyllabusMindmapModal';
 import {
   BROWSE_GRADES_JUNIOR,
   BROWSE_GRADES_SENIOR,
@@ -548,6 +551,8 @@ export function ExamBuilderView({
   const [intensity, setIntensity] = useState<number>(35);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [mindmapOpen, setMindmapOpen] = useState(false);
+  const [mindmapSelection, setMindmapSelection] = useState<MindmapSelection>({ subtopics: [], dotPoints: [] });
 
   const subjectsForGrade = useMemo(() => SUBJECTS_BY_YEAR[grade] || [], [grade]);
   const topicsForSelection = useMemo(() => {
@@ -578,6 +583,8 @@ export function ExamBuilderView({
       intensity,
       topics: selectedTopics,
       cognitive: isSimMode,
+      subtopics: mindmapSelection.subtopics,
+      dotPoints: mindmapSelection.dotPoints,
     });
     if (!result.ok) {
       setError(result.message || 'Unable to create exam.');
@@ -637,7 +644,46 @@ export function ExamBuilderView({
             />
           </div>
           <div className="space-y-4">
-            <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400">Topic Focus</label>
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400">Topic Focus</label>
+              <button
+                type="button"
+                onClick={() => setMindmapOpen(true)}
+                title="Browse syllabus and restrict by subtopic / dot point"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all hover:bg-neutral-100 border border-neutral-200 text-neutral-500 hover:text-neutral-800"
+              >
+                <Map size={12} />
+                <span>Mindmap</span>
+                {(mindmapSelection.subtopics.length > 0 || mindmapSelection.dotPoints.length > 0) && (
+                  <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#b5a45d] text-white text-[9px] font-bold">
+                    {mindmapSelection.subtopics.length + mindmapSelection.dotPoints.length}
+                  </span>
+                )}
+              </button>
+            </div>
+            {(mindmapSelection.subtopics.length > 0 || mindmapSelection.dotPoints.length > 0) && (
+              <div className="flex flex-wrap gap-2 items-center">
+                {mindmapSelection.subtopics.map((s) => (
+                  <span key={`sub-${s}`} className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-[#b5a45d]/10 border border-[#b5a45d]/30 text-[11px] font-semibold text-[#8a7a3a]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#b5a45d] shrink-0" />
+                    {s}
+                  </span>
+                ))}
+                {mindmapSelection.dotPoints.length > 0 && (
+                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-neutral-100 border border-neutral-200 text-[11px] font-semibold text-neutral-500">
+                    <Plus size={10} />
+                    {mindmapSelection.dotPoints.length} dot {mindmapSelection.dotPoints.length === 1 ? 'point' : 'points'}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setMindmapSelection({ subtopics: [], dotPoints: [] })}
+                  className="text-[10px] font-bold text-neutral-400 hover:text-neutral-600 uppercase tracking-wider transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
             <div className="space-y-3">
               <button
                 type="button"
@@ -707,6 +753,14 @@ export function ExamBuilderView({
           <p className="text-[10px] text-neutral-400 font-bold uppercase tracking-[0.3em] mt-8">Adaptive Logic V4.2 Engaged</p>
         </div>
       </div>
+      <SyllabusMindmapModal
+        open={mindmapOpen}
+        onClose={() => setMindmapOpen(false)}
+        initialGrade={grade}
+        initialSubject={subject}
+        initialSelection={mindmapSelection}
+        onConfirm={(sel) => setMindmapSelection(sel)}
+      />
     </div>
   );
 }

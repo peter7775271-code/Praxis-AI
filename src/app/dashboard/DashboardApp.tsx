@@ -4188,6 +4188,17 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
       const filtered = gradeSubjectPool.filter((q) => {
         if (params.topics.length > 0 && !params.topics.includes(String(q.topic))) return false;
+
+        const subtopics = params.subtopics || [];
+        const dotPoints = params.dotPoints || [];
+        if (subtopics.length > 0 || dotPoints.length > 0) {
+          const qSubtopic = String((q as any).subtopic || '').trim();
+          const qDotPoint = String((q as any).syllabus_dot_point || '').trim();
+          if (subtopics.length > 0 && subtopics.includes(qSubtopic)) return true;
+          if (dotPoints.length > 0 && dotPoints.some((dp) => qDotPoint.includes(dp))) return true;
+          return false;
+        }
+
         return true;
       });
 
