@@ -352,6 +352,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [activePaper, setActivePaper] = useState<{ year: string; subject: string; grade: string; school: string; count: number } | null>(null);
   const [exportingPaperPdf, setExportingPaperPdf] = useState<'exam' | 'solutions' | null>(null);
   const [exportingSavedExamPdf, setExportingSavedExamPdf] = useState<'exam' | 'solutions' | null>(null);
+  const [exportingCustomExamPdf, setExportingCustomExamPdf] = useState<'exam' | 'solutions' | null>(null);
   const [examEndsAt, setExamEndsAt] = useState<number | null>(null);
   const [examRemainingMs, setExamRemainingMs] = useState<number | null>(null);
   const [examConditionsActive, setExamConditionsActive] = useState(false);
@@ -2393,10 +2394,15 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
 
     const blob = await response.blob();
+    const contentDisposition = response.headers.get('content-disposition') || '';
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    const filenameMatch = contentDisposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    const serverFilename = filenameMatch ? decodeURIComponent(filenameMatch[1]) : '';
+    const defaultExt = contentType.includes('application/x-tex') ? '.tex' : '.pdf';
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `${downloadName.replace(/[^a-z0-9\-_.]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'custom-exam'}${includeSolutions ? '-with-solutions' : ''}.pdf`;
+    anchor.download = serverFilename || `${downloadName.replace(/[^a-z0-9\-_.]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'custom-exam'}${includeSolutions ? '-with-solutions' : ''}${defaultExt}`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -2467,6 +2473,37 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       alert(err instanceof Error ? err.message : 'Failed to export PDF');
     } finally {
       setExportingSavedExamPdf(null);
+    }
+  };
+
+  const exportCustomExamPdf = async (includeSolutions: boolean) => {
+    if (!paperQuestions.length) {
+      alert('No custom exam questions are available to export.');
+      return;
+    }
+
+    const mode: 'exam' | 'solutions' = includeSolutions ? 'solutions' : 'exam';
+    setExportingCustomExamPdf(mode);
+
+    try {
+      const subject = activePaper?.subject || 'Custom Exam';
+      const grade = activePaper?.grade || '';
+      const title = `${subject} ${includeSolutions ? 'Solutions' : 'Paper'}`;
+      const subtitle = [grade, `${paperQuestions.length} question${paperQuestions.length === 1 ? '' : 's'}`].filter(Boolean).join(' • ');
+      const downloadName = `${activePaper?.year || 'custom'}-${subject}-${grade || 'exam'}`;
+
+      await exportExamQuestionsPdf({
+        includeSolutions,
+        questions: paperQuestions,
+        title,
+        subtitle,
+        downloadName,
+      });
+    } catch (err) {
+      console.error('Error exporting custom exam PDF:', err);
+      alert(err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setExportingCustomExamPdf(null);
     }
   };
 
@@ -4664,6 +4701,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                   examTitle={activePaper?.subject || 'Custom Exam'}
                   examMeta={activePaper ? `${activePaper.grade} • ${activePaper.count} questions` : null}
                   questions={paperQuestions}
+                  exportingPdf={exportingCustomExamPdf}
+                  onExportPdf={exportCustomExamPdf}
                   onBack={() => {
                     setViewMode('builder');
                     router.push('/dashboard/builder');

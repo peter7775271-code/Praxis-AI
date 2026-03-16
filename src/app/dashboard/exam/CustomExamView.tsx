@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ArrowLeft, BookOpen, Eye, EyeOff, Info } from 'lucide-react';
+import { ArrowLeft, BookOpen, Download, Eye, EyeOff, Info } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { formatPartDividerPlaceholder, LatexText, QuestionTextWithDividers } from '../question-text-with-dividers';
 import { stripOuterBraces } from '../view-helpers';
@@ -164,11 +164,15 @@ export default function CustomExamView({
   examTitle,
   examMeta,
   questions,
+  exportingPdf,
+  onExportPdf,
   onBack,
 }: {
   examTitle: string;
   examMeta?: string | null;
   questions: CustomExamQuestion[];
+  exportingPdf: 'exam' | 'solutions' | null;
+  onExportPdf: (includeSolutions: boolean) => Promise<void>;
   onBack: () => void;
 }) {
   const [showSolutions, setShowSolutions] = React.useState(false);
@@ -226,6 +230,27 @@ export default function CustomExamView({
           >
             {showSolutions ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             {showSolutions ? 'Hide Solutions' : 'View Solutions'}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => onExportPdf(false)}
+            disabled={exportingPdf !== null || !displayQuestions.length}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+          >
+            <Download className="h-4 w-4" />
+            {exportingPdf === 'exam' ? 'Exporting Questions PDF…' : 'Export Questions PDF'}
+          </button>
+          <button
+            type="button"
+            onClick={() => onExportPdf(true)}
+            disabled={exportingPdf !== null || !displayQuestions.length}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-900 bg-neutral-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+          >
+            <Download className="h-4 w-4" />
+            {exportingPdf === 'solutions' ? 'Exporting Solutions PDF…' : 'Export Questions + Solutions PDF'}
           </button>
         </div>
 
