@@ -7,6 +7,7 @@ import { formatPartDividerPlaceholder, LatexText, QuestionTextWithDividers } fro
 import { stripOuterBraces } from '../view-helpers';
 
 const DEFAULT_EXAM_SOURCE_LABEL = 'HSC';
+const RESPONSIVE_IMAGE_CLASS = 'mx-auto block h-auto max-h-[58vh] w-auto max-w-full object-contain';
 
 const getMcqOptions = (question: CustomExamQuestion) => (
   [
@@ -308,7 +309,8 @@ export default function CustomExamView({
                       <img
                         src={question.graph_image_data}
                         alt={`Question ${displayNumber} graph`}
-                        className={`mx-auto h-auto rounded-xl graph-image graph-image--${question.graph_image_size || 'medium'}`}
+                        loading="lazy"
+                        className={`${RESPONSIVE_IMAGE_CLASS} rounded-xl graph-image graph-image--${question.graph_image_size || 'medium'}`}
                       />
                     </div>
                   ) : null}
@@ -321,7 +323,12 @@ export default function CustomExamView({
                             <span className="pt-0.5 text-sm font-bold text-neutral-700">{option.label}.</span>
                             <div className="min-w-0 flex-1 font-serif text-neutral-900">
                               {option.image ? (
-                                <img src={option.image} alt={`Option ${option.label}`} className="max-w-full rounded-lg" />
+                                <img
+                                  src={option.image}
+                                  alt={`Option ${option.label}`}
+                                  loading="lazy"
+                                  className={`${RESPONSIVE_IMAGE_CLASS} max-h-[40vh] rounded-lg`}
+                                />
                               ) : (
                                 <LatexText text={option.text} />
                               )}
@@ -355,7 +362,12 @@ export default function CustomExamView({
                         <div className="space-y-4 text-neutral-800">
                           {question.sample_answer ? <QuestionTextWithDividers text={question.sample_answer} /> : null}
                           {question.sample_answer_image ? (
-                            <img src={question.sample_answer_image} alt="Sample solution" className="w-full rounded-xl border border-neutral-200 bg-white" />
+                            <img
+                              src={question.sample_answer_image}
+                              alt="Sample solution"
+                              loading="lazy"
+                              className={`${RESPONSIVE_IMAGE_CLASS} rounded-xl border border-neutral-200 bg-white p-1`}
+                            />
                           ) : null}
                         </div>
                       ) : (

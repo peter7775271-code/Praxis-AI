@@ -16,6 +16,7 @@ import {
   Map,
   RotateCcw,
 } from 'lucide-react';
+import RenderLatexText from '@/components/RenderLatexText';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -431,7 +432,7 @@ export default function SyllabusMindmapModal({
               <Map className="w-5 h-5 text-[#b5a45d]" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-neutral-900">Syllabus Mindmap</h2>
+              <h2 className="text-xl font-bold text-neutral-900">Syllabus Selector</h2>
               <p className="text-xs text-neutral-400 font-medium">Select subtopics and dot points to restrict your exam</p>
             </div>
           </div>
@@ -641,9 +642,10 @@ export default function SyllabusMindmapModal({
                               <Square className="w-3.5 h-3.5 text-neutral-300" />
                             )}
                           </div>
-                          <p className={`text-xs leading-relaxed ${isDpChecked ? 'text-neutral-800 font-medium' : 'text-neutral-500'}`}>
-                            {dp.text}
-                          </p>
+                          <RenderLatexText
+                            text={dp.text}
+                            className={`text-xs leading-relaxed ${isDpChecked ? 'text-neutral-800 font-medium' : 'text-neutral-500'}`}
+                          />
                         </div>
                       );
                     })

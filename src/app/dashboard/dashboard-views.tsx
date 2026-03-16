@@ -630,7 +630,7 @@ export function ExamBuilderView({
           </div>
           <div className="space-y-4">
             <div className="flex justify-between items-center">
-              <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400">Intensity (Questions)</label>
+              <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400">Question count</label>
               <span className="text-sm font-bold text-[#b5a45d]">{intensity}</span>
             </div>
             <input
@@ -654,7 +654,7 @@ export function ExamBuilderView({
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all hover:bg-neutral-100 border border-neutral-200 text-neutral-500 hover:text-neutral-800"
               >
                 <MapIcon size={12} />
-                <span>Mindmap</span>
+                <span>Syllabus</span>
                 {(mindmapSelection.subtopics.length > 0 || mindmapSelection.dotPoints.length > 0) && (
                   <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#b5a45d] text-white text-[9px] font-bold">
                     {mindmapSelection.subtopics.length + mindmapSelection.dotPoints.length}
@@ -685,34 +685,40 @@ export function ExamBuilderView({
                 </button>
               </div>
             )}
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => setSelectedTopics([])}
-                className={`w-full px-4 py-3 rounded-xl text-sm font-semibold transition-all ${allTopicsActive ? 'bg-neutral-900 text-white' : 'bg-neutral-50 border border-neutral-100 text-neutral-500'}`}
-              >
-                All topics
-              </button>
-              {topicsForSelection.length === 0 ? (
-                <div className="text-xs text-neutral-400">No topics available for this subject yet.</div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {topicsForSelection.map((t) => {
-                    const active = selectedTopics.includes(t);
-                    return (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => toggleTopic(t)}
-                        className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${active ? 'bg-[#b5a45d] text-white' : 'bg-neutral-50 border border-neutral-100 text-neutral-600'}`}
-                      >
-                        {t}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            {mindmapSelection.subtopics.length > 0 || mindmapSelection.dotPoints.length > 0 ? (
+              <div className="rounded-xl border border-[#b5a45d]/25 bg-[#b5a45d]/5 px-4 py-3 text-xs font-medium text-[#8a7a3a]">
+                Topic buttons are hidden while syllabus restrictions are active.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTopics([])}
+                  className={`w-full px-4 py-3 rounded-xl text-sm font-semibold transition-all ${allTopicsActive ? 'bg-neutral-900 text-white' : 'bg-neutral-50 border border-neutral-100 text-neutral-500'}`}
+                >
+                  All topics
+                </button>
+                {topicsForSelection.length === 0 ? (
+                  <div className="text-xs text-neutral-400">No topics available for this subject yet.</div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {topicsForSelection.map((t) => {
+                      const active = selectedTopics.includes(t);
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => toggleTopic(t)}
+                          className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${active ? 'bg-[#b5a45d] text-white' : 'bg-neutral-50 border border-neutral-100 text-neutral-600'}`}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="space-y-4">
             <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400">Cognitive Environment</label>
