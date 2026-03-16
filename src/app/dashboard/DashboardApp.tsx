@@ -4524,11 +4524,11 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
               <LayoutDashboard size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Dashboard</span>
             </button>
-            <button onClick={() => { setViewMode('browse'); router.push('/dashboard/browse'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'browse' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+            <button onClick={() => { setViewMode('browse'); router.push('/dashboard/browse'); setSidebarHovered(false); }} className={`hidden w-full items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'browse' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <BookOpen size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Browse Bank</span>
             </button>
-            <button onClick={() => { setViewMode('analytics'); router.push('/dashboard/analytics'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'analytics' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+            <button onClick={() => { setViewMode('analytics'); router.push('/dashboard/analytics'); setSidebarHovered(false); }} className={`hidden w-full items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'analytics' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <LineChart size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Analytics Hub</span>
             </button>
@@ -4545,7 +4545,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Saved Content</span>
               {savedAttempts.length > 0 && sidebarContentExpanded && <span className="text-xs text-neutral-400">({savedAttempts.length})</span>}
             </button>
-            <button onClick={() => { setViewMode('history'); router.push('/dashboard/history'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'history' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+            <button onClick={() => { setViewMode('history'); router.push('/dashboard/history'); setSidebarHovered(false); }} className={`hidden w-full items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'history' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <History size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>My History</span>
             </button>
