@@ -649,6 +649,7 @@ export function ExamBuilderView({
               <button
                 type="button"
                 onClick={() => setMindmapOpen(true)}
+                aria-label="Browse syllabus mindmap to restrict questions by subtopic or dot point"
                 title="Browse syllabus and restrict by subtopic / dot point"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all hover:bg-neutral-100 border border-neutral-200 text-neutral-500 hover:text-neutral-800"
               >

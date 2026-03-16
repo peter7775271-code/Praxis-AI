@@ -4192,8 +4192,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         const subtopics = params.subtopics || [];
         const dotPoints = params.dotPoints || [];
         if (subtopics.length > 0 || dotPoints.length > 0) {
-          const qSubtopic = String((q as any).subtopic || '').trim();
-          const qDotPoint = String((q as any).syllabus_dot_point || '').trim();
+          const qSubtopic = String(q.subtopic || '').trim();
+          const qDotPoint = String(q.syllabus_dot_point || '').trim();
           if (subtopics.length > 0 && subtopics.includes(qSubtopic)) return true;
           if (dotPoints.length > 0 && dotPoints.some((dp) => qDotPoint.includes(dp))) return true;
           return false;
