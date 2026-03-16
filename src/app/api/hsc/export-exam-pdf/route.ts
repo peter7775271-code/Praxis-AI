@@ -1002,6 +1002,94 @@ const compileTexToPdfLocal = async ({ tex, tempDir }: { tex: string; tempDir: st
   return pdfBuffer;
 };
 
+const compileTexToPdfRemote = async ({
+  tex,
+  tempDir,
+  questions,
+}: {
+  tex: string;
+  tempDir: string;
+  questions: ExportQuestion[];
+}) => {
+  const referencedAssets = getReferencedAssetFilenames(questions);
+  const resources: Array<Record<string, unknown>> = [
+    {
+      main: true,
+      path: LOCAL_TEX_FILENAME,
+      content: tex,
+    },
+  ];
+
+  for (const filename of referencedAssets) {
+    const filePath = path.join(tempDir, filename);
+    const fileBuffer = await readFile(filePath);
+    resources.push({
+      path: filename,
+      file: fileBuffer.toString('base64'),
+    });
+  }
+
+  const response = await fetchWithTimeout(
+    LATEX_TO_PDF_API_URL,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        compiler: 'pdflatex',
+        resources,
+        options: {
+          compiler: {
+            halt_on_error: true,
+            silent: false,
+          },
+          response: {
+            log_files_on_failure: true,
+          },
+        },
+      }),
+    },
+    PDF_COMPILE_TIMEOUT_MS
+  );
+
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+  const outputBuffer = Buffer.from(await response.arrayBuffer());
+
+  if (response.ok && isPdfBuffer(outputBuffer)) {
+    return outputBuffer;
+  }
+
+  if (response.ok && contentType.includes('application/pdf')) {
+    return outputBuffer;
+  }
+
+  const responseBodyText = outputBuffer.toString('utf8');
+  throw new Error(
+    [
+      `Remote compiler failed (${response.status} ${response.statusText}).`,
+      responseBodyText ? truncateDiagnostic(responseBodyText) : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+  );
+};
+
+const resolveCompileOrder = () => {
+  // Supported modes:
+  // - auto (default): remote first on Vercel, local first elsewhere
+  // - local: local only
+  // - remote: remote only
+  // - local-first: local then remote
+  // - remote-first: remote then local
+  const mode = LATEX_TO_PDF_API_MODE;
+  if (mode === 'local') return ['local'] as const;
+  if (mode === 'remote') return ['remote'] as const;
+  if (mode === 'local-first') return ['local', 'remote'] as const;
+  if (mode === 'remote-first') return ['remote', 'local'] as const;
+  return IS_VERCEL_RUNTIME ? (['remote', 'local'] as const) : (['local', 'remote'] as const);
+};
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -1072,22 +1160,28 @@ export async function POST(request: Request) {
       }
 
       const compileErrors: string[] = [];
+      const compileOrder = resolveCompileOrder();
 
       for (const attempt of attempts) {
-        try {
-          const pdfBuffer = await compileTexToPdfLocal({ tex: attempt.tex, tempDir });
-          const filename = `${baseFilename}.pdf`;
-          return new Response(pdfBuffer, {
-            status: 200,
-            headers: {
-              'Content-Type': 'application/pdf',
-              'Content-Disposition': `attachment; filename="${filename}"`,
-              'Cache-Control': 'no-store',
-            },
-          });
-        } catch (attemptError) {
-          const message = attemptError instanceof Error ? attemptError.message : String(attemptError);
-          compileErrors.push(`[${attempt.label}] ${message}`);
+        for (const compiler of compileOrder) {
+          try {
+            const pdfBuffer = compiler === 'remote'
+              ? await compileTexToPdfRemote({ tex: attempt.tex, tempDir, questions: enrichedQuestions })
+              : await compileTexToPdfLocal({ tex: attempt.tex, tempDir });
+
+            const filename = `${baseFilename}.pdf`;
+            return new Response(pdfBuffer, {
+              status: 200,
+              headers: {
+                'Content-Type': 'application/pdf',
+                'Content-Disposition': `attachment; filename="${filename}"`,
+                'Cache-Control': 'no-store',
+              },
+            });
+          } catch (attemptError) {
+            const message = attemptError instanceof Error ? attemptError.message : String(attemptError);
+            compileErrors.push(`[${attempt.label}:${compiler}] ${message}`);
+          }
         }
       }
 
