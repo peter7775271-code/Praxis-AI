@@ -69,6 +69,8 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
     .replace(/\\\{\}\s*([A-Za-z]+)/g, '\\$1')
     .replace(/\\\{\}\s*([!,:;])/g, '\\$1')
     .replace(/\\dfrac/g, '\\frac')
+    // Repair fused command pairs from OCR/model output, e.g. \pidisplaystyle -> \pi\displaystyle.
+    .replace(/\\(pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega)(displaystyle|textstyle)\b/g, '\\$1\\$2')
     // Split fused command+word like \thetain → \theta in, \alphax → \alpha x.
     // Uses a function to pick the longest matching command, and skips splitting
     // when the full token is itself a valid LaTeX command (e.g. \left, \cosec).
@@ -122,7 +124,11 @@ const repairMatrixRowSeparators = (value: string) =>
   value.replace(
     /\\begin\{([pbBvV]?matrix|smallmatrix)\}([\s\S]*?)\\end\{\1\}/g,
     (_match, env: string, body: string) => {
-      const repaired = body.replace(/(?<!\\)\\([a-zA-Z])(?![a-zA-Z])/g, (_m, letter) => `\\\\${letter}`);
+      const repaired = body
+        // Single-backslash + letter inside matrix body is usually a broken row separator.
+        .replace(/(?<!\\)\\([a-zA-Z])(?![a-zA-Z])/g, (_m, letter) => `\\\\${letter}`)
+        // Also repair single-backslash row separators before numeric/sign-leading entries.
+        .replace(/(?<!\\)\\(?=\s*[-+]?\d)/g, '\\\\');
       return `\\begin{${env}}${repaired}\\end{${env}}`;
     }
   );
@@ -441,6 +447,7 @@ const SAFE_LATEX_COMMANDS = new Set([
   'text', 'textbf', 'mathrm', 'mathit', 'mathbf', 'ensuremath',
   'quad', 'qquad', 'dots', 'ldots', 'cdots',
   'noindent', 'newline', 'par', 'vspace', 'hspace', 'textbackslash', 'textasciicircum', 'textasciitilde', 'textdegree',
+  'displaystyle', 'textstyle',
   'begin', 'end', 'item', 'itemsep', 'centering', 'hline',
   'section', 'subsection', 'subsubsection',
   'includegraphics', 'url', 'href', 'label', 'ref',
