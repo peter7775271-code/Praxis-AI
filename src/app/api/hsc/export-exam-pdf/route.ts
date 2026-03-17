@@ -418,8 +418,64 @@ const normalizeInlineDollarMath = (value: string) => {
   return chars.join('');
 };
 
+const balanceMathDelimiters = (value: string) => {
+  const chars = Array.from(value);
+  let inlineDollarOpen = false;
+  let displayDollarOpen = false;
+  let parenMathDepth = 0;
+  let bracketMathDepth = 0;
+
+  for (let index = 0; index < chars.length; index += 1) {
+    const current = chars[index];
+    if (current === '\\' && !isEscapedAt(chars, index)) {
+      const next = chars[index + 1];
+      if (next === '(') {
+        parenMathDepth += 1;
+        index += 1;
+        continue;
+      }
+      if (next === ')') {
+        if (parenMathDepth > 0) parenMathDepth -= 1;
+        index += 1;
+        continue;
+      }
+      if (next === '[') {
+        bracketMathDepth += 1;
+        index += 1;
+        continue;
+      }
+      if (next === ']') {
+        if (bracketMathDepth > 0) bracketMathDepth -= 1;
+        index += 1;
+        continue;
+      }
+      continue;
+    }
+
+    if (current !== '$' || isEscapedAt(chars, index)) continue;
+    const next = chars[index + 1];
+    if (next === '$' && !isEscapedAt(chars, index + 1)) {
+      displayDollarOpen = !displayDollarOpen;
+      index += 1;
+    } else {
+      inlineDollarOpen = !inlineDollarOpen;
+    }
+  }
+
+  let output = chars.join('');
+  if (inlineDollarOpen) output += '\\$';
+  if (displayDollarOpen) output += '$$';
+  if (parenMathDepth > 0) output += '\\)'.repeat(parenMathDepth);
+  if (bracketMathDepth > 0) output += '\\]'.repeat(bracketMathDepth);
+  return output;
+};
+
 const finalizeCompileSafeBody = (value: string) =>
-  neutralizeUnknownLatexCommands(normalizeInlineDollarMath(balanceLatexBraces(repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(value)))));
+  neutralizeUnknownLatexCommands(
+    balanceMathDelimiters(
+      normalizeInlineDollarMath(balanceLatexBraces(repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(value))))
+    )
+  );
 
 const SAFE_LATEX_COMMANDS = new Set([
   'frac', 'dfrac', 'sqrt', 'left', 'right', 'cdot', 'times', 'div',
@@ -727,7 +783,7 @@ const buildExamLatex = ({
     if (compileSafeMode) {
       return finalizeCompileSafeBody(applyCompileSafeLatexRepairs(normalized));
     }
-    return normalized;
+    return balanceMathDelimiters(normalized);
   };
 
   const renumberMap = new Map<string, number>();
