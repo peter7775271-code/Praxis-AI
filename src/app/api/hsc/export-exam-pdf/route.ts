@@ -835,12 +835,18 @@ const buildExamLatex = ({
     return { ...details, mappedMain };
   });
 
-  const renderQuestionContent = (question: ExportQuestion, lines: string[], inlinePrefix = '') => {
+  const renderQuestionContent = (
+    question: ExportQuestion,
+    lines: string[],
+    inlinePrefix = '',
+    skipQuestionText = false
+  ) => {
     const questionType = question.question_type || 'written';
-    const questionText = renderBody(String(question.question_text || ''));
-
-    lines.push(`${inlinePrefix}${questionText || 'No question text provided.'}`);
-    lines.push('');
+    if (!skipQuestionText) {
+      const questionText = renderBody(String(question.question_text || ''));
+      lines.push(`${inlinePrefix}${questionText || 'No question text provided.'}`);
+      lines.push('');
+    }
     if (question.graph_image_file) {
       lines.push('\\begin{center}');
       lines.push(`\\includegraphics[draft=false,width=${imageWidthBySize(question.graph_image_size)}]{${question.graph_image_file}}`);
@@ -953,10 +959,11 @@ const buildExamLatex = ({
         const subQ = groupQuestions[gi];
         const subD = groupDetails[gi];
         const subMarks = Number(subQ.marks || 0);
+        const subQuestionText = renderBody(String(subQ.question_text || '')) || 'No question text provided.';
 
-        lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
-        lines.push(`\\textbf{(${escapeLatexText(subD.roman || '')})}${subMarks > 0 ? ` & \\textbf{${subMarks}}` : ' & '}\\\\`);        lines.push('\\end{tabular*}');
-        renderQuestionContent(subQ, lines);
+        lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.roman || '')})} ${subQuestionText}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
+        lines.push('');
+        renderQuestionContent(subQ, lines, '', true);
         if (gi < groupQuestions.length - 1) {
           lines.push('\\vspace{0.5em}');
         }

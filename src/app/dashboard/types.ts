@@ -35,6 +35,8 @@ export type ExamBuilderParams = {
   grade: 'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12';
   intensity: number;
   topics: string[];
+  /** If true, include every available question for the selected topic filter instead of using intensity. */
+  allQuestionsFromTopic?: boolean;
   cognitive: boolean;
   /** Subtopic names to restrict questions to (empty = no restriction). */
   subtopics?: string[];

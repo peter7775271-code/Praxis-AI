@@ -4243,7 +4243,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       }
 
       const shuffled = shuffleQuestions(filtered);
-      const targetCount = Math.min(params.intensity, shuffled.length);
+      const useAllQuestionsFromTopic = Boolean(params.allQuestionsFromTopic) && params.topics.length === 1;
+      const targetCount = useAllQuestionsFromTopic ? shuffled.length : Math.min(params.intensity, shuffled.length);
       const selected = shuffled.slice(0, targetCount);
       const manualGroupedSelection = expandManualGroupedSelection(selected, gradeSubjectPool, customExamGroupByQuestionId);
       const romanGroupedSelection = expandRomanSubpartSelection(manualGroupedSelection, gradeSubjectPool);

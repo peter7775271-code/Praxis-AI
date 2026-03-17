@@ -550,6 +550,7 @@ export function ExamBuilderView({
   const [grade, setGrade] = useState<'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12'>('Year 12');
   const [intensity, setIntensity] = useState<number>(35);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
+  const [allQuestionsFromTopic, setAllQuestionsFromTopic] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mindmapOpen, setMindmapOpen] = useState(false);
   const [mindmapSelection, setMindmapSelection] = useState<MindmapSelection>({ subtopics: [], dotPoints: [] });
@@ -575,6 +576,14 @@ export function ExamBuilderView({
     setSelectedTopics((prev) => prev.filter((t) => topicsForSelection.includes(t)));
   }, [topicsForSelection]);
 
+  useEffect(() => {
+    const hasSyllabusRestrictions = mindmapSelection.subtopics.length > 0 || mindmapSelection.dotPoints.length > 0;
+    const hasSingleTopic = selectedTopics.length === 1;
+    if (hasSyllabusRestrictions || !hasSingleTopic) {
+      setAllQuestionsFromTopic(false);
+    }
+  }, [mindmapSelection.dotPoints.length, mindmapSelection.subtopics.length, selectedTopics.length]);
+
   const handleInitialize = async () => {
     setError(null);
     const result = await onInitializeExam({
@@ -582,6 +591,7 @@ export function ExamBuilderView({
       grade,
       intensity,
       topics: selectedTopics,
+      allQuestionsFromTopic,
       cognitive: isSimMode,
       subtopics: mindmapSelection.subtopics,
       dotPoints: mindmapSelection.dotPoints,
@@ -631,7 +641,7 @@ export function ExamBuilderView({
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400">Question count</label>
-              <span className="text-sm font-bold text-[#b5a45d]">{intensity}</span>
+              <span className="text-sm font-bold text-[#b5a45d]">{allQuestionsFromTopic ? 'ALL' : intensity}</span>
             </div>
             <input
               type="range"
@@ -640,8 +650,12 @@ export function ExamBuilderView({
               step={5}
               value={intensity}
               onChange={(e) => setIntensity(Number(e.target.value))}
+              disabled={allQuestionsFromTopic}
               className="w-full accent-[#b5a45d] h-1.5 bg-neutral-100 rounded-lg appearance-none cursor-pointer"
             />
+            <p className="text-[11px] text-neutral-400">
+              {allQuestionsFromTopic ? 'Using every available question from the selected topic.' : 'Set how many questions to include.'}
+            </p>
           </div>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -693,7 +707,10 @@ export function ExamBuilderView({
               <div className="space-y-3">
                 <button
                   type="button"
-                  onClick={() => setSelectedTopics([])}
+                  onClick={() => {
+                    setSelectedTopics([]);
+                    setAllQuestionsFromTopic(false);
+                  }}
                   className={`w-full px-4 py-3 rounded-xl text-sm font-semibold transition-all ${allTopicsActive ? 'bg-neutral-900 text-white' : 'bg-neutral-50 border border-neutral-100 text-neutral-500'}`}
                 >
                   All topics
@@ -716,6 +733,22 @@ export function ExamBuilderView({
                       );
                     })}
                   </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setAllQuestionsFromTopic((prev) => !prev)}
+                  disabled={selectedTopics.length !== 1}
+                  className={`w-full px-4 py-3 rounded-xl text-xs font-semibold transition-all ${
+                    allQuestionsFromTopic
+                      ? 'bg-[#b5a45d] text-white'
+                      : 'bg-neutral-50 border border-neutral-100 text-neutral-600'
+                  } ${selectedTopics.length !== 1 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  title={selectedTopics.length === 1 ? 'Generate all questions from this topic' : 'Select exactly one topic to enable'}
+                >
+                  {allQuestionsFromTopic ? 'All Questions From Selected Topic: ON' : 'All Questions From Selected Topic'}
+                </button>
+                {selectedTopics.length !== 1 && (
+                  <p className="text-[11px] text-neutral-400">Select exactly one topic to enable this mode.</p>
                 )}
               </div>
             )}
