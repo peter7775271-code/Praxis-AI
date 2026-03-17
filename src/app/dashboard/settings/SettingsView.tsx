@@ -82,13 +82,13 @@ export default function SettingsView({
                             </div>
                           </div>
                           <div>
-                            <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Email</label>
-                            <p className="mt-1 text-lg" style={{ color: 'var(--clr-light-a0)' }}>{userEmail}</p>
+                            <label className="text-sm font-medium" style={{ color: 'var(--clr-primary-a50)' }}>Email</label>
+                            <p className="mt-1 text-lg" style={{ color: 'var(--clr-primary-a50)' }}>{userEmail}</p>
                           </div>
 
                           <div>
-                            <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Date Joined</label>
-                            <p className="mt-1 text-lg" style={{ color: 'var(--clr-light-a0)' }}>
+                            <label className="text-sm font-medium" style={{ color: 'var(--clr-primary-a50)' }}>Date Joined</label>
+                            <p className="mt-1 text-lg" style={{ color: 'var(--clr-primary-a50)' }}>
                               {userCreatedAt ? new Date(userCreatedAt).toLocaleDateString('en-AU', {
                                 year: 'numeric',
                                 month: 'long',

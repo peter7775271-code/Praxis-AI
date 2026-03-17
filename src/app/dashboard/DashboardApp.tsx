@@ -34,7 +34,6 @@ import {
   LayoutDashboard,
   LineChart,
   PlusCircle,
-  Sigma,
   History,
   SlidersHorizontal,
   Brain,
@@ -4535,10 +4534,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
             <button onClick={() => { setViewMode('builder'); clearPaperState(); router.push('/dashboard/builder'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'builder' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <PlusCircle size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Exam Architect</span>
-            </button>
-            <button onClick={() => { setViewMode('formulas'); router.push('/dashboard/formulas'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'formulas' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
-              <Sigma size={18} className="shrink-0" />
-              <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Formula Vault</span>
             </button>
             <button onClick={() => { loadSavedAttempts(); setViewMode('saved'); router.push('/dashboard/saved'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'saved' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <Bookmark size={18} className="shrink-0" />
