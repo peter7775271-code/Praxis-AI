@@ -140,9 +140,34 @@ const wrapParenthesizedMathLikeSegments = (value: string) =>
     return `${prefix}\\(${candidate}\\)`;
   });
 
+const sanitizeMisplacedTableRules = (value: string) => {
+  const tableLikeEnvironments = new Set(['tabular', 'tabular*', 'array', 'tabularx', 'longtable']);
+  let tableDepth = 0;
+
+  return value.replace(/\\begin\{([^}]+)\}|\\end\{([^}]+)\}|\\hline\b/g, (token, beginEnv, endEnv) => {
+    if (beginEnv) {
+      if (tableLikeEnvironments.has(String(beginEnv).trim())) {
+        tableDepth += 1;
+      }
+      return token;
+    }
+
+    if (endEnv) {
+      if (tableLikeEnvironments.has(String(endEnv).trim())) {
+        tableDepth = Math.max(0, tableDepth - 1);
+      }
+      return token;
+    }
+
+    return tableDepth > 0 ? token : '';
+  });
+};
+
 const normalizeLatexBody = (value: string) =>
   wrapParenthesizedMathLikeSegments(
-    repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+    sanitizeMisplacedTableRules(
+      repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+    )
     .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
     .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/gi, '')
     .replace(/\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{[^}]+\}/gi, '')
