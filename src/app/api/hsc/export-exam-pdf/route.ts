@@ -453,6 +453,17 @@ const normalizeInlineDollarMath = (value: string) => {
   return chars.join('');
 };
 
+const unwrapInlineMathInsideDisplayMath = (value: string) =>
+  value
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, body) => {
+      const normalizedBody = String(body || '').replace(/\\\(([\s\S]*?)\\\)/g, '$1');
+      return `\\[${normalizedBody}\\]`;
+    })
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_match, body) => {
+      const normalizedBody = String(body || '').replace(/\\\(([\s\S]*?)\\\)/g, '$1');
+      return `$$${normalizedBody}$$`;
+    });
+
 const balanceMathDelimiters = (value: string) => {
   const chars = Array.from(value);
   let inlineDollarOpen = false;
@@ -508,7 +519,9 @@ const balanceMathDelimiters = (value: string) => {
 const finalizeCompileSafeBody = (value: string) =>
   neutralizeUnknownLatexCommands(
     balanceMathDelimiters(
-      normalizeInlineDollarMath(balanceLatexBraces(repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(value))))
+      unwrapInlineMathInsideDisplayMath(
+        normalizeInlineDollarMath(balanceLatexBraces(repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(value))))
+      )
     )
   );
 
@@ -816,10 +829,11 @@ const buildExamLatex = ({
     if (plainTextMode) {
       return escapeLatexText(normalized);
     }
+    const displaySafeNormalized = unwrapInlineMathInsideDisplayMath(normalized);
     if (compileSafeMode) {
-      return finalizeCompileSafeBody(applyCompileSafeLatexRepairs(normalized));
+      return finalizeCompileSafeBody(applyCompileSafeLatexRepairs(displaySafeNormalized));
     }
-    return balanceMathDelimiters(normalized);
+    return balanceMathDelimiters(displaySafeNormalized);
   };
 
   const renumberMap = new Map<string, number>();

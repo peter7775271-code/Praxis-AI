@@ -29,6 +29,78 @@ export default function SettingsView({
   submitPdfPair,
 }: Props) {
   const router = useRouter();
+  const [unspecifiedTopicLimit, setUnspecifiedTopicLimit] = React.useState(10);
+  const [isClassifyingUnspecifiedTopics, setIsClassifyingUnspecifiedTopics] = React.useState(false);
+  const [unspecifiedTopicStatus, setUnspecifiedTopicStatus] = React.useState<'idle' | 'success' | 'error'>('idle');
+  const [unspecifiedTopicResult, setUnspecifiedTopicResult] = React.useState('');
+  const [unspecifiedTopicOutputs, setUnspecifiedTopicOutputs] = React.useState<any[]>([]);
+
+  const runUnspecifiedTopicClassification = async () => {
+    if (!selectedSyllabusMappingPaper) {
+      setUnspecifiedTopicStatus('error');
+      setUnspecifiedTopicResult('Select an exam first.');
+      setUnspecifiedTopicOutputs([]);
+      return;
+    }
+
+    const selectedPaper = availablePapers.find((paper: any) => getPaperKey(paper) === selectedSyllabusMappingPaper);
+    if (!selectedPaper) {
+      setUnspecifiedTopicStatus('error');
+      setUnspecifiedTopicResult('Selected exam is no longer available.');
+      setUnspecifiedTopicOutputs([]);
+      return;
+    }
+
+    const limit = Number.isFinite(unspecifiedTopicLimit)
+      ? Math.max(1, Math.min(200, Math.floor(unspecifiedTopicLimit)))
+      : 10;
+
+    try {
+      setIsClassifyingUnspecifiedTopics(true);
+      setUnspecifiedTopicStatus('idle');
+      setUnspecifiedTopicResult('');
+      setUnspecifiedTopicOutputs([]);
+
+      const response = await fetch('/api/hsc/classify-unspecified-topics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grade: selectedPaper.grade,
+          year: selectedPaper.year,
+          subject: selectedPaper.subject,
+          school: selectedPaper.school,
+          limit,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setUnspecifiedTopicStatus('error');
+        setUnspecifiedTopicResult(String(data?.error || `Classification failed (${response.status})`));
+        setUnspecifiedTopicOutputs(Array.isArray(data?.outputs) ? data.outputs : []);
+        return;
+      }
+
+      const totals = data?.totals || {};
+      const debugCounts = data?.debugCounts || {};
+      const debugSuffix =
+        Number(totals.processed || 0) === 0
+          ? ` (year matches: ${debugCounts.allQuestionsByYear || 0}, paper-context matches: ${debugCounts.matchedPaperContext || 0})`
+          : '';
+      setUnspecifiedTopicStatus('success');
+      setUnspecifiedTopicResult(
+        `Processed ${totals.processed || 0} of ${totals.foundUnspecified || 0} unspecified questions. Updated ${totals.updated || 0}, failed ${totals.failed || 0}.${debugSuffix}`
+      );
+      setUnspecifiedTopicOutputs(Array.isArray(data?.outputs) ? data.outputs : []);
+      fetchAllQuestions({ includeIncomplete: true });
+    } catch (error) {
+      setUnspecifiedTopicStatus('error');
+      setUnspecifiedTopicResult(error instanceof Error ? error.message : 'Failed to classify unspecified topics');
+      setUnspecifiedTopicOutputs([]);
+    } finally {
+      setIsClassifyingUnspecifiedTopics(false);
+    }
+  };
 
   return (
                 <div className="flex-1 flex flex-col">
@@ -392,6 +464,131 @@ export default function SettingsView({
                             </div>
                           )}
                         </div>
+                        </div>
+
+                        <div
+                          className="p-6 rounded-2xl border mt-6"
+                          style={{
+                            backgroundColor: 'var(--clr-surface-a10)',
+                            borderColor: 'var(--clr-surface-tonal-a20)',
+                          }}
+                        >
+                          <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--clr-primary-a50)' }}>
+                            Unspecified Topic Classifier
+                          </h2>
+                          <p className="text-sm mb-4" style={{ color: 'var(--clr-surface-a40)' }}>
+                            Developer-only: send question text and question image (if present) to GPT, constrained to taxonomy topics/subtopics for this paper context.
+                          </p>
+
+                          <div className="space-y-4">
+                            <div>
+                              <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>
+                                Questions to process
+                              </label>
+                              <input
+                                type="number"
+                                min={1}
+                                max={200}
+                                step={1}
+                                value={unspecifiedTopicLimit}
+                                onChange={(e) => {
+                                  const parsed = Number.parseInt(e.target.value, 10);
+                                  setUnspecifiedTopicLimit(Number.isFinite(parsed) ? parsed : 1);
+                                }}
+                                disabled={isClassifyingUnspecifiedTopics}
+                                className="mt-2 w-full px-4 py-2 rounded-lg border"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                  color: 'var(--clr-primary-a50)',
+                                }}
+                              />
+                              <p className="mt-2 text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
+                                Uses the selected exam above. Year 11/12 papers automatically include both Year 11 and Year 12 taxonomy topics/subtopics.
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={runUnspecifiedTopicClassification}
+                                disabled={isClassifyingUnspecifiedTopics || availablePapers.length === 0 || !selectedSyllabusMappingPaper}
+                                className="px-4 py-2 rounded-lg font-medium cursor-pointer disabled:opacity-50"
+                                style={{
+                                  backgroundColor: 'var(--clr-primary-a0)',
+                                  color: 'var(--clr-dark-a0)',
+                                }}
+                              >
+                                {isClassifyingUnspecifiedTopics ? 'Classifying...' : 'Classify Unspecified Topics'}
+                              </button>
+                              {unspecifiedTopicResult && (
+                                <span
+                                  className="text-sm"
+                                  style={{
+                                    color:
+                                      unspecifiedTopicStatus === 'error'
+                                        ? 'var(--clr-danger-a10)'
+                                        : unspecifiedTopicStatus === 'success'
+                                          ? 'var(--clr-success-a10)'
+                                          : 'var(--clr-surface-a50)',
+                                  }}
+                                >
+                                  {unspecifiedTopicResult}
+                                </span>
+                              )}
+                            </div>
+
+                            {unspecifiedTopicOutputs.length > 0 && (
+                              <div
+                                className="mt-3 rounded-xl border p-4 max-h-96 overflow-y-auto custom-scrollbar"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                }}
+                              >
+                                <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--clr-primary-a50)' }}>
+                                  Classification Output
+                                </h3>
+                                <div className="space-y-3">
+                                  {unspecifiedTopicOutputs.map((entry, index) => {
+                                    const topic = String(entry?.topic || '').trim();
+                                    const subtopic = String(entry?.subtopic || '').trim();
+                                    const reason = String(entry?.reason || '').trim();
+                                    const rawText = String(entry?.rawTextOutput || entry?.rawModelOutput || '').trim();
+                                    return (
+                                      <div
+                                        key={`${entry?.questionId || 'q'}-${index}`}
+                                        className="rounded-lg border p-3"
+                                        style={{
+                                          backgroundColor: 'var(--clr-surface-a10)',
+                                          borderColor: 'var(--clr-surface-tonal-a20)',
+                                        }}
+                                      >
+                                        <p className="text-xs font-medium mb-2" style={{ color: 'var(--clr-surface-a50)' }}>
+                                          Q{entry?.questionNumber || 'unknown'} • {entry?.success ? `${topic} → ${subtopic}` : 'Failed'}
+                                        </p>
+                                        {reason && (
+                                          <p className="text-xs mb-2" style={{ color: 'var(--clr-surface-a40)' }}>
+                                            {reason}
+                                          </p>
+                                        )}
+                                        {rawText && (
+                                          <pre
+                                            className="text-xs whitespace-pre-wrap break-words rounded-md p-2 mt-2"
+                                            style={{
+                                              backgroundColor: 'var(--clr-dark-a0)',
+                                              color: 'var(--clr-light-a0)',
+                                            }}
+                                          >
+                                            {rawText}
+                                          </pre>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         <div

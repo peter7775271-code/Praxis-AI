@@ -119,6 +119,15 @@ const Excalidraw = dynamic(
 // TikzRenderer no longer used in this page
 
 const CUSTOM_EXAM_STORAGE_KEY = 'currentCustomExam';
+const CUSTOM_EXAM_SESSION_STORAGE_KEY = 'currentCustomExam:session';
+
+const isQuotaExceededError = (error: unknown) => {
+  if (error instanceof DOMException) {
+    return error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED';
+  }
+  const message = String((error as { message?: string })?.message || '').toLowerCase();
+  return message.includes('quota') && message.includes('exceed');
+};
 
 const pad2 = (value: number) => String(value).padStart(2, '0');
 
@@ -4267,17 +4276,64 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         savedAt: new Date().toISOString(),
       };
 
-      const existing = JSON.parse(localStorage.getItem('savedAttempts') || '[]');
-      existing.push(exam);
-      localStorage.setItem('savedAttempts', JSON.stringify(existing));
-      setSavedAttempts(existing);
+      try {
+        const existing = JSON.parse(localStorage.getItem('savedAttempts') || '[]');
+        existing.push(exam);
+        localStorage.setItem('savedAttempts', JSON.stringify(existing));
+        setSavedAttempts(existing);
+      } catch (storageError) {
+        if (isQuotaExceededError(storageError)) {
+          console.warn('Skipping savedAttempts persistence: localStorage quota exceeded.');
+        } else {
+          throw storageError;
+        }
+      }
 
       const customPaper = { year: 'Custom', subject: params.subject, grade: params.grade, school: 'Custom', count: finalSelectionWithSharedImages.length };
-      localStorage.setItem(CUSTOM_EXAM_STORAGE_KEY, JSON.stringify({
+      const storagePayload = {
         activePaper: customPaper,
         questions: finalSelectionWithSharedImages,
         createdAt: new Date().toISOString(),
+      };
+      const compactQuestions = finalSelectionWithSharedImages.map((q) => ({
+        ...q,
+        graph_image_data: null,
+        sample_answer_image: null,
+        mcq_option_a_image: null,
+        mcq_option_b_image: null,
+        mcq_option_c_image: null,
+        mcq_option_d_image: null,
       }));
+
+      let persistedForRestore = false;
+      try {
+        sessionStorage.setItem(CUSTOM_EXAM_SESSION_STORAGE_KEY, JSON.stringify(storagePayload));
+        persistedForRestore = true;
+      } catch (storageError) {
+        if (!isQuotaExceededError(storageError)) {
+          throw storageError;
+        }
+      }
+
+      try {
+        localStorage.setItem(CUSTOM_EXAM_STORAGE_KEY, JSON.stringify({
+          ...storagePayload,
+          questions: compactQuestions,
+          compact: true,
+        }));
+        persistedForRestore = true;
+      } catch (storageError) {
+        if (!isQuotaExceededError(storageError)) {
+          throw storageError;
+        }
+      }
+
+      if (!persistedForRestore) {
+        return {
+          ok: false,
+          message: 'Exam is too large to store for navigation. Reduce question count or disable all-topic mode.',
+        };
+      }
 
       setActivePaper(customPaper);
       setPaperQuestions(finalSelectionWithSharedImages);
@@ -4356,7 +4412,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     if (initialViewMode !== 'exam') return;
 
     try {
-      const raw = localStorage.getItem(CUSTOM_EXAM_STORAGE_KEY);
+      const raw = sessionStorage.getItem(CUSTOM_EXAM_SESSION_STORAGE_KEY)
+        || localStorage.getItem(CUSTOM_EXAM_STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
       const storedQuestions = Array.isArray(parsed?.questions) ? parsed.questions.filter(isStoredQuestion) : [];
@@ -4572,10 +4629,12 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
               <LayoutDashboard size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Dashboard</span>
             </button>
-            <button onClick={() => { setViewMode('browse'); router.push('/dashboard/browse'); setSidebarHovered(false); }} className={`hidden w-full items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'browse' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
-              <BookOpen size={18} className="shrink-0" />
-              <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Browse Bank</span>
-            </button>
+            {isDevMode && (
+              <button onClick={() => { setViewMode('browse'); router.push('/dashboard/browse'); setSidebarHovered(false); }} className={`w-full flex items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'browse' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
+                <BookOpen size={18} className="shrink-0" />
+                <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Browse Exam</span>
+              </button>
+            )}
             <button onClick={() => { setViewMode('analytics'); router.push('/dashboard/analytics'); setSidebarHovered(false); }} className={`hidden w-full items-center py-4 transition-all duration-200 text-left cursor-pointer shrink-0 ${sidebarItemLayoutClass} ${sidebarItemGapClass} ${viewMode === 'analytics' ? 'sidebar-link-active font-semibold' : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'}`}>
               <LineChart size={18} className="shrink-0" />
               <span className={`text-sm tracking-wide whitespace-nowrap transition-all duration-200 ${sidebarTextClass}`}>Analytics Hub</span>

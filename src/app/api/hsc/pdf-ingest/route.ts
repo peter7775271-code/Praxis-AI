@@ -926,9 +926,7 @@ export async function POST(request: Request) {
     const schoolNameForDb = schoolName || 'HSC';
     const parsedPaperNumber = Number.parseInt(String(paperNumberInput || ''), 10);
     const hasExplicitPaperNumber = Number.isInteger(parsedPaperNumber) && parsedPaperNumber > 0;
-    const allowTopicIdentify =
-      generateMarkingCriteria &&
-      (grade.includes('7') || grade.includes('8') || grade.includes('9') || grade.includes('10') || grade.includes('11') || grade.includes('12'));
+    const allowTopicIdentify = false;
 
     if (!grade || Number.isNaN(year) || !subject) {
       return NextResponse.json({ error: 'Invalid grade, year, or subject' }, { status: 400 });
@@ -1045,10 +1043,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No extractable text found in uploads' }, { status: 400 });
     }
 
-    const topicOptions = getTopicOptions(grade, subject);
-    if (!topicOptions) {
-      return NextResponse.json({ error: 'Year 11 Extension 2 is not supported.' }, { status: 400 });
-    }
+    const topicOptions: string[] = [];
 
     const createChatCompletion = async (args: {
       model: string;
@@ -1196,7 +1191,7 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
         }
 
         const insertPayload = normalized.questions.map((question) => {
-          const topic = question.topic || 'Unspecified';
+          const topic = 'Unspecified';
           const isMcq = question.questionType === 'multiple_choice';
 
           return {
@@ -1396,7 +1391,7 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
           }
 
           const insertPayload = normalized.questions.map((question) => {
-            const topic = question.topic || 'Unspecified';
+            const topic = 'Unspecified';
             const isMcq = question.questionType === 'multiple_choice';
 
             return {
@@ -1646,6 +1641,39 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
       }
     }
 
+    let unspecifiedClassification: Record<string, unknown> | null = null;
+    if (createdQuestions.length > 0) {
+      try {
+        const classifyUrl = new URL('/api/hsc/classify-unspecified-topics', request.url).toString();
+        const classifyResponse = await fetch(classifyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            grade,
+            year,
+            subject,
+            school: schoolNameForDb,
+            questionIds: createdQuestions
+              .map((question: any) => String(question?.id || '').trim())
+              .filter(Boolean),
+          }),
+        });
+
+        unspecifiedClassification = await classifyResponse.json().catch(() => ({}));
+
+        if (!classifyResponse.ok) {
+          console.error('Auto classify unspecified topics failed:', unspecifiedClassification);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to classify unspecified topics';
+        console.error('Auto classify unspecified topics failed:', error);
+        unspecifiedClassification = {
+          success: false,
+          error: message,
+        };
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: `Created ${createdQuestions.length} questions. Updated ${updatedCriteriaCount} marking criteria.`,
@@ -1671,6 +1699,7 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
       refusals,
       autoGroupsByQuestionId,
       updatedQuestions,
+      unspecifiedClassification,
       chatgpt: combinedModelOutput,
       modelOutput: combinedModelOutput,
       rawInputs,
