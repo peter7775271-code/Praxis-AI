@@ -69,6 +69,8 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
     .replace(/\\\{\}\s*([A-Za-z]+)/g, '\\$1')
     .replace(/\\\{\}\s*([!,:;])/g, '\\$1')
     .replace(/\\dfrac/g, '\\frac')
+    // Repair fused command pairs from OCR/model output, e.g. \pidisplaystyle -> \pi\displaystyle.
+    .replace(/\\(pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega)(displaystyle|textstyle)\b/g, '\\$1\\$2')
     // Split fused command+word like \thetain → \theta in, \alphax → \alpha x.
     // Uses a function to pick the longest matching command, and skips splitting
     // when the full token is itself a valid LaTeX command (e.g. \left, \cosec).
@@ -122,7 +124,11 @@ const repairMatrixRowSeparators = (value: string) =>
   value.replace(
     /\\begin\{([pbBvV]?matrix|smallmatrix)\}([\s\S]*?)\\end\{\1\}/g,
     (_match, env: string, body: string) => {
-      const repaired = body.replace(/(?<!\\)\\([a-zA-Z])(?![a-zA-Z])/g, (_m, letter) => `\\\\${letter}`);
+      const repaired = body
+        // Single-backslash + letter inside matrix body is usually a broken row separator.
+        .replace(/(?<!\\)\\([a-zA-Z])(?![a-zA-Z])/g, (_m, letter) => `\\\\${letter}`)
+        // Also repair single-backslash row separators before numeric/sign-leading entries.
+        .replace(/(?<!\\)\\(?=\s*[-+]?\d)/g, '\\\\');
       return `\\begin{${env}}${repaired}\\end{${env}}`;
     }
   );
@@ -134,9 +140,34 @@ const wrapParenthesizedMathLikeSegments = (value: string) =>
     return `${prefix}\\(${candidate}\\)`;
   });
 
+const sanitizeMisplacedTableRules = (value: string) => {
+  const tableLikeEnvironments = new Set(['tabular', 'tabular*', 'array', 'tabularx', 'longtable']);
+  let tableDepth = 0;
+
+  return value.replace(/\\begin\{([^}]+)\}|\\end\{([^}]+)\}|\\hline\b/g, (token, beginEnv, endEnv) => {
+    if (beginEnv) {
+      if (tableLikeEnvironments.has(String(beginEnv).trim())) {
+        tableDepth += 1;
+      }
+      return token;
+    }
+
+    if (endEnv) {
+      if (tableLikeEnvironments.has(String(endEnv).trim())) {
+        tableDepth = Math.max(0, tableDepth - 1);
+      }
+      return token;
+    }
+
+    return tableDepth > 0 ? token : '';
+  });
+};
+
 const normalizeLatexBody = (value: string) =>
   wrapParenthesizedMathLikeSegments(
-    repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+    sanitizeMisplacedTableRules(
+      repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+    )
     .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
     .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/gi, '')
     .replace(/\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{[^}]+\}/gi, '')
@@ -287,6 +318,8 @@ const applyOcrMathRepairs = (value: string) =>
     .replace(/\[\s*([^\]]+)\s*\]/g, (match, candidate, offset, source) => {
       const raw = String(candidate || '').trim();
       if (!raw) return match;
+      // Avoid creating nested delimiters like $\(...\)$ when already in math mode.
+      if (isInsideMathAt(source, offset)) return match;
       // Don't convert brackets that are part of \left[...\right] or after a LaTeX command
       const before = source.slice(Math.max(0, offset - 10), offset);
       if (/\\(left|right|begin|sqrt|operatorname)\s*$/.test(before)) return match;
@@ -353,6 +386,8 @@ const applyCompileSafeLatexRepairs = (value: string) =>
     .replace(/\[\s*([^\]]+)\s*\]/g, (match, candidate, offset, source) => {
       const raw = String(candidate || '').trim();
       if (!raw) return match;
+      // Avoid creating nested delimiters like $\(...\)$ when already in math mode.
+      if (isInsideMathAt(source, offset)) return match;
       // Don't convert brackets that are part of \left[...\right] or after a LaTeX command
       const before = source.slice(Math.max(0, offset - 10), offset);
       if (/\\(left|right|begin|sqrt|operatorname)\s*$/.test(before)) return match;
@@ -479,7 +514,7 @@ const finalizeCompileSafeBody = (value: string) =>
 
 const SAFE_LATEX_COMMANDS = new Set([
   'frac', 'dfrac', 'sqrt', 'left', 'right', 'cdot', 'times', 'div',
-  'le', 'leq', 'ge', 'geq', 'neq', 'pm', 'mp', 'infty',
+  'le', 'leq', 'ge', 'geq', 'ne', 'neq', 'pm', 'mp', 'infty',
   'sum', 'int', 'lim', 'log', 'ln', 'exp',
   'sin', 'cos', 'tan', 'sec', 'cosec', 'cot', 'operatorname',
   'alpha', 'beta', 'gamma', 'delta', 'theta', 'lambda', 'mu', 'sigma', 'phi', 'omega',
@@ -493,6 +528,7 @@ const SAFE_LATEX_COMMANDS = new Set([
   'text', 'textbf', 'mathrm', 'mathit', 'mathbf', 'ensuremath',
   'quad', 'qquad', 'dots', 'ldots', 'cdots',
   'noindent', 'newline', 'par', 'vspace', 'hspace', 'textbackslash', 'textasciicircum', 'textasciitilde', 'textdegree',
+  'displaystyle', 'textstyle',
   'begin', 'end', 'item', 'itemsep', 'centering', 'hline',
   'section', 'subsection', 'subsubsection',
   'includegraphics', 'url', 'href', 'label', 'ref',
@@ -998,9 +1034,151 @@ ${body}
 \\end{document}`;
 };
 
-export async function POST(request: Request) {
-  let tempDir: string | undefined;
+const compileTexToPdfLocal = async ({ tex, tempDir }: { tex: string; tempDir: string }) => {
+  const texPath = path.join(tempDir, LOCAL_TEX_FILENAME);
+  const logPath = path.join(tempDir, 'exam.log');
+  const pdfPath = path.join(tempDir, 'exam.pdf');
 
+  await writeFile(texPath, tex, 'utf8');
+
+  await access(PDFLATEX_PATH, constants.X_OK);
+
+  try {
+    await execFileAsync(
+      PDFLATEX_PATH,
+      ['-interaction=nonstopmode', '-halt-on-error', LOCAL_TEX_FILENAME],
+      {
+        cwd: tempDir,
+        timeout: PDF_COMPILE_TIMEOUT_MS,
+      }
+    );
+  } catch (error) {
+    const execError = error as { stdout?: string; stderr?: string; message?: string };
+    let logRaw = '';
+    try {
+      logRaw = await readFile(logPath, 'utf8');
+    } catch {
+      logRaw = '';
+    }
+
+    const logTail = extractLatexErrorContext(logRaw);
+    const lineNumber = extractTexLineNumber(logRaw || execError.stderr || execError.stdout || '');
+    const texContext = lineNumber ? await readTexContext(texPath, lineNumber) : '';
+    const diagnostic = composePdflatexDiagnostic({
+      stderr: String(execError.stderr || ''),
+      stdout: String(execError.stdout || ''),
+      logTail,
+    });
+
+    const details = [
+      execError.message || 'pdflatex failed',
+      lineNumber ? `line: ${lineNumber}` : '',
+      texContext ? `tex context:\n${texContext}` : '',
+      diagnostic ? truncateDiagnostic(diagnostic) : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    throw new Error(details || 'pdflatex failed');
+  }
+
+  const pdfBuffer = await readFile(pdfPath);
+  if (!isPdfBuffer(pdfBuffer)) {
+    throw new Error(`Compiled output is not a valid PDF. Preview: ${safeUtf8Preview(pdfBuffer, 240)}`);
+  }
+
+  return pdfBuffer;
+};
+
+const compileTexToPdfRemote = async ({
+  tex,
+  tempDir,
+  questions,
+}: {
+  tex: string;
+  tempDir: string;
+  questions: ExportQuestion[];
+}) => {
+  const referencedAssets = getReferencedAssetFilenames(questions);
+  const resources: Array<Record<string, unknown>> = [
+    {
+      main: true,
+      path: LOCAL_TEX_FILENAME,
+      content: tex,
+    },
+  ];
+
+  for (const filename of referencedAssets) {
+    const filePath = path.join(tempDir, filename);
+    const fileBuffer = await readFile(filePath);
+    resources.push({
+      path: filename,
+      file: fileBuffer.toString('base64'),
+    });
+  }
+
+  const response = await fetchWithTimeout(
+    LATEX_TO_PDF_API_URL,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        compiler: 'pdflatex',
+        resources,
+        options: {
+          compiler: {
+            halt_on_error: true,
+            silent: false,
+          },
+          response: {
+            log_files_on_failure: true,
+          },
+        },
+      }),
+    },
+    PDF_COMPILE_TIMEOUT_MS
+  );
+
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+  const outputBuffer = Buffer.from(await response.arrayBuffer());
+
+  if (response.ok && isPdfBuffer(outputBuffer)) {
+    return outputBuffer;
+  }
+
+  if (response.ok && contentType.includes('application/pdf')) {
+    return outputBuffer;
+  }
+
+  const responseBodyText = outputBuffer.toString('utf8');
+  throw new Error(
+    [
+      `Remote compiler failed (${response.status} ${response.statusText}).`,
+      responseBodyText ? truncateDiagnostic(responseBodyText) : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+  );
+};
+
+const resolveCompileOrder = () => {
+  // Supported modes:
+  // - auto (default): remote first on Vercel, local first elsewhere
+  // - local: local only
+  // - remote: remote only
+  // - local-first: local then remote
+  // - remote-first: remote then local
+  const mode = LATEX_TO_PDF_API_MODE;
+  if (mode === 'local') return ['local'] as const;
+  if (mode === 'remote') return ['remote'] as const;
+  if (mode === 'local-first') return ['local', 'remote'] as const;
+  if (mode === 'remote-first') return ['remote', 'local'] as const;
+  return IS_VERCEL_RUNTIME ? (['remote', 'local'] as const) : (['local', 'remote'] as const);
+};
+
+export async function POST(request: Request) {
   try {
     const body = await request.json();
     const questions = Array.isArray(body?.questions) ? (body.questions as ExportQuestion[]) : [];
@@ -1008,427 +1186,116 @@ export async function POST(request: Request) {
     const title = String(body?.title || 'Custom Exam').trim();
     const subtitle = String(body?.subtitle || '').trim();
     const downloadNameBase = String(body?.downloadName || 'custom-exam').trim() || 'custom-exam';
+    const outputFormat = String(body?.format || 'pdf').trim().toLowerCase();
+    const wantsTex = outputFormat === 'tex';
 
     if (!questions.length) {
-      return Response.json({ error: 'At least one question is required to export a PDF' }, { status: 400 });
+      return Response.json({ error: 'At least one question is required to export TeX' }, { status: 400 });
     }
-
-    const hasQuestionImages = questions.some((question) => {
-      const hasDiagram = Boolean(String(question.graph_image_data || '').trim());
-      const hasSolutionImage = includeSolutions && Boolean(String(question.sample_answer_image || '').trim());
-      const hasMcqOptionImage = [
-        question.mcq_option_a_image,
-        question.mcq_option_b_image,
-        question.mcq_option_c_image,
-        question.mcq_option_d_image,
-      ].some((source) => Boolean(String(source || '').trim()));
-      return hasDiagram || hasSolutionImage || hasMcqOptionImage;
-    });
 
     const safeBase = downloadNameBase.replace(/[^a-z0-9\-_.]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    const filename = `${safeBase || 'custom-exam'}${includeSolutions ? '-with-solutions' : ''}.pdf`;
+    const baseFilename = `${safeBase || 'custom-exam'}${includeSolutions ? '-with-solutions' : ''}`;
 
-    let pdfBuffer: Buffer;
-    let imagesOmittedInFallback = false;
-    let usedApiFallback = false;
-    let usedPlainTextFallback = false;
-    let apiFallbackImageStats: { mode: 'ytotech' | 'generic'; referenced: number; attached: number } | null = null;
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'export-exam-pdf-'));
     try {
-      try {
-        await access(PDFLATEX_PATH, constants.X_OK);
-      } catch (missingPdflatexError) {
-        if (IS_VERCEL_RUNTIME) {
-          console.warn(
-            `[export-exam-pdf] Local pdflatex not found on Vercel at "${PDFLATEX_PATH}"; using API fallback via LATEX_TO_PDF_API_URL.`
-          );
-        } else {
-          console.warn(
-            `[export-exam-pdf] Local pdflatex not found at "${PDFLATEX_PATH}"; using API fallback via LATEX_TO_PDF_API_URL.`
-          );
-        }
-        const sentinel = new Error(LOCAL_PDFLATEX_MISSING_SENTINEL);
-        (sentinel as Error & { cause?: unknown }).cause = missingPdflatexError;
-        throw sentinel;
-      }
+      const enrichedQuestions = await attachQuestionImageAssets(questions, tempDir, includeSolutions);
 
-      tempDir = await mkdtemp(path.join(os.tmpdir(), 'export-exam-'));
-      const texPath = path.join(tempDir, LOCAL_TEX_FILENAME);
-      const pdfPath = path.join(tempDir, 'exam.pdf');
-
-      const questionsWithAssets = await attachQuestionImageAssets(questions, tempDir, includeSolutions);
-      const tex = buildExamLatex({
+      const primaryTex = buildExamLatex({
         title,
         subtitle,
         includeSolutions,
-        questions: questionsWithAssets,
+        questions: enrichedQuestions,
       });
 
-      await writeFile(texPath, tex, 'utf8');
-
-      try {
-        await execFileAsync(PDFLATEX_PATH, [
-          '-interaction=nonstopmode',
-          '-file-line-error',
-          '-halt-on-error',
-          '-output-directory',
-          tempDir,
-          LOCAL_TEX_FILENAME,
-        ], { cwd: tempDir, timeout: PDF_COMPILE_TIMEOUT_MS });
-      } catch (compileError: any) {
-        // Retry with LaTeX-preserving safe mode for malformed OCR fragments.
-        const safeTex = buildExamLatex({
-          title,
-          subtitle,
-          includeSolutions,
-          questions: questionsWithAssets,
-          compileSafeMode: true,
-        });
-        await writeFile(texPath, safeTex, 'utf8');
-        try {
-          await execFileAsync(PDFLATEX_PATH, [
-            '-interaction=nonstopmode',
-            '-file-line-error',
-            '-halt-on-error',
-            '-output-directory',
-            tempDir,
-            LOCAL_TEX_FILENAME,
-          ], { cwd: tempDir, timeout: PDF_COMPILE_TIMEOUT_MS });
-        } catch (safeCompileError: any) {
-          if (ENABLE_PLAIN_TEXT_PDF_FALLBACK) {
-            const plainTex = buildExamLatex({
-              title,
-              subtitle,
-              includeSolutions,
-              questions: questionsWithAssets,
-              compileSafeMode: true,
-              plainTextMode: true,
-            });
-            usedPlainTextFallback = true;
-            await writeFile(texPath, plainTex, 'utf8');
-            try {
-              await execFileAsync(PDFLATEX_PATH, [
-                '-interaction=nonstopmode',
-                '-file-line-error',
-                '-halt-on-error',
-                '-output-directory',
-                tempDir,
-                LOCAL_TEX_FILENAME,
-              ], { cwd: tempDir, timeout: PDF_COMPILE_TIMEOUT_MS });
-            } catch {
-              const stderr = String(safeCompileError?.stderr || compileError?.stderr || '').trim();
-              const stdout = String(safeCompileError?.stdout || compileError?.stdout || '').trim();
-              let logTail = '';
-              try {
-                const logPath = path.join(tempDir, 'exam.log');
-                const logRaw = await readFile(logPath, 'utf8');
-                logTail = extractLatexErrorContext(logRaw);
-              } catch {
-                // ignore log extraction failures
-              }
-              const details = composePdflatexDiagnostic({ stderr, stdout, logTail }) || String(safeCompileError || compileError);
-                const lineNumber = extractTexLineNumber(details);
-                const texContext = lineNumber ? await readTexContext(texPath, lineNumber) : '';
-                const diagnostic = texContext ? `${details}\n\n--- exam.tex context ---\n${texContext}` : details;
-                throw new Error(`pdflatex failed: ${truncateDiagnostic(diagnostic)}`);
-            }
-          } else {
-            const stderr = String(safeCompileError?.stderr || compileError?.stderr || '').trim();
-            const stdout = String(safeCompileError?.stdout || compileError?.stdout || '').trim();
-            let logTail = '';
-            try {
-              const logPath = path.join(tempDir, 'exam.log');
-              const logRaw = await readFile(logPath, 'utf8');
-              logTail = extractLatexErrorContext(logRaw);
-            } catch {
-              // ignore log extraction failures
-            }
-            const details = composePdflatexDiagnostic({ stderr, stdout, logTail }) || String(safeCompileError || compileError);
-              const lineNumber = extractTexLineNumber(details);
-              const texContext = lineNumber ? await readTexContext(texPath, lineNumber) : '';
-              const diagnostic = texContext ? `${details}\n\n--- exam.tex context ---\n${texContext}` : details;
-              throw new Error(`pdflatex failed after LaTeX-safe retries: ${truncateDiagnostic(diagnostic)}`);
-          }
-        }
-      }
-
-      pdfBuffer = await readFile(pdfPath);
-    } catch (localCompileError: any) {
-      usedApiFallback = true;
-      const localCompileMessage = String(localCompileError?.message || '');
-      const localCompileDiagnostic = truncateDiagnostic(localCompileMessage || String(localCompileError || ''));
-      if (localCompileMessage === LOCAL_PDFLATEX_MISSING_SENTINEL) {
-        console.warn('[export-exam-pdf] Skipping local compile because pdflatex is unavailable; proceeding with LATEX_TO_PDF_API_URL fallback.');
-      } else {
-        console.warn('[export-exam-pdf] Local pdflatex failed, falling back to LATEX_TO_PDF_API_URL when possible', localCompileError);
-      }
-      const isYtoTechApi = LATEX_TO_PDF_API_MODE === 'ytotech' || LATEX_TO_PDF_API_URL.includes('latex.ytotech.com/builds/sync');
-      const fallbackImageStats: { mode: 'ytotech' | 'generic'; referenced: number; attached: number } = {
-        mode: isYtoTechApi ? 'ytotech' : 'generic',
-        referenced: 0,
-        attached: 0,
-      };
-      apiFallbackImageStats = fallbackImageStats;
-      if (hasQuestionImages && !isYtoTechApi) {
-        imagesOmittedInFallback = true;
-        console.warn('[export-exam-pdf] Embedded images are omitted in API fallback unless using YtoTech multipart endpoint.');
-      }
-
-      let apiQuestions: ExportQuestion[] = questions;
-      if (hasQuestionImages && isYtoTechApi) {
-        if (!tempDir) {
-          tempDir = await mkdtemp(path.join(os.tmpdir(), 'export-exam-'));
-        }
-        apiQuestions = await attachQuestionImageAssets(questions, tempDir, includeSolutions);
-      }
-
-      const compileViaLatexApi = async (texInput: string, questionsWithAssets?: ExportQuestion[]) => {
-        const queryParams = new URLSearchParams({
-          command: 'pdflatex',
-          force: 'true',
-          download: filename,
-        });
-        const postUrlWithQuery = `${LATEX_TO_PDF_API_URL}${LATEX_TO_PDF_API_URL.includes('?') ? '&' : '?'}${queryParams.toString()}`;
-        const postUrl = isYtoTechApi ? LATEX_TO_PDF_API_URL : postUrlWithQuery;
-
-        const parsePdfResponse = async (response: Response) => {
-          if (!response.ok) {
-            const details = await response.text().catch(() => 'LaTeX API request failed');
-            throw new Error(`LaTeX API error (${response.status}): ${details}`);
-          }
-          const arrayBuffer = await response.arrayBuffer();
-          const pdf = Buffer.from(arrayBuffer);
-          if (!isPdfBuffer(pdf)) {
-            throw new Error(`LaTeX API returned non-PDF payload: ${safeUtf8Preview(pdf)}`);
-          }
-          return pdf;
-        };
-
-        const postAttempts: Array<{ name: string; init: RequestInit }> = [];
-
-        if (isYtoTechApi) {
-          const resources: Array<Record<string, unknown>> = [
-            {
-              main: true,
-              path: 'main.tex',
-              content: texInput,
-            },
-          ];
-
-          if (questionsWithAssets && tempDir) {
-            const assetNames = getReferencedAssetFilenames(questionsWithAssets);
-            fallbackImageStats.referenced = assetNames.length;
-            const missingAssets: string[] = [];
-            for (const assetName of assetNames) {
-              try {
-                const fullPath = path.join(tempDir, assetName);
-                const data = await readFile(fullPath);
-                resources.push({
-                  path: assetName,
-                  content: data.toString('base64'),
-                  encoding: 'base64',
-                });
-                fallbackImageStats.attached += 1;
-              } catch {
-                missingAssets.push(assetName);
-              }
-            }
-            if (missingAssets.length) {
-              throw new Error(`Failed to attach ${missingAssets.length} image resource(s) for API fallback: ${missingAssets.join(', ')}`);
-            }
-          }
-
-          postAttempts.push({
-            name: 'ytotech-json-resources',
-            init: {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                compiler: 'pdflatex',
-                resources,
-                options: {
-                  compiler: {
-                    halt_on_error: true,
-                    silent: false,
-                  },
-                  response: {
-                    log_files_on_failure: true,
-                  },
-                },
-              }),
-            },
-          });
-
-          const form = new FormData();
-          form.set('compiler', 'pdflatex');
-          form.set('main', 'main.tex');
-          const mainFile = new File([texInput], 'main.tex', { type: 'application/x-tex' });
-          form.append('resources[]', mainFile);
-          form.append('resources', mainFile);
-
-          if (questionsWithAssets && tempDir) {
-            const assetNames = getReferencedAssetFilenames(questionsWithAssets);
-            for (const assetName of assetNames) {
-              try {
-                const fullPath = path.join(tempDir, assetName);
-                const data = await readFile(fullPath);
-                const ext = detectImageExt(assetName);
-                const mime = ext === 'jpg' ? 'image/jpeg' : 'image/png';
-                const file = new File([data], assetName, { type: mime });
-                form.append('resources[]', file);
-                form.append('resources', file);
-              } catch {
-                // json-resources path above is authoritative; multipart is best-effort fallback
-              }
-            }
-          }
-
-          postAttempts.push({
-            name: 'multipart-ytotech',
-            init: {
-              method: 'POST',
-              body: form,
-            },
-          });
-        }
-
-        postAttempts.push(
-          {
-            name: 'form-urlencoded',
-            init: {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: new URLSearchParams({ text: texInput }).toString(),
-            },
+      if (wantsTex) {
+        const filename = `${baseFilename}.tex`;
+        return new Response(primaryTex, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/x-tex; charset=utf-8',
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            'Cache-Control': 'no-store',
           },
-          {
-            name: 'json',
-            init: {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text: texInput, command: 'pdflatex', force: true, download: filename }),
-            },
-          },
-          {
-            name: 'text-plain',
-            init: {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-              body: texInput,
-            },
-          }
-        );
-
-        const postUnsupportedStatuses = new Set([404, 405, 415]);
-        let lastPostError = '';
-
-        for (const attempt of postAttempts) {
-          const response = await fetchWithTimeout(postUrl, attempt.init, PDF_COMPILE_TIMEOUT_MS);
-          if (response.ok) {
-            return parsePdfResponse(response);
-          }
-
-          if (postUnsupportedStatuses.has(response.status)) {
-            lastPostError = `${attempt.name} unsupported (${response.status})`;
-            continue;
-          }
-
-          const details = await response.text().catch(() => 'LaTeX API request failed');
-          throw new Error(`LaTeX API error (${response.status}) on ${attempt.name}: ${details}`);
-        }
-
-        if (texInput.length > MAX_GET_TEX_LENGTH) {
-          throw new Error(`LaTeX API POST not supported (${lastPostError || 'unknown'}), and payload is too large for GET fallback (${texInput.length} chars > ${MAX_GET_TEX_LENGTH}). Configure LATEX_TO_PDF_API_URL to a POST-capable compiler endpoint (for example https://latex.ytotech.com/builds/sync with LATEX_TO_PDF_API_MODE=ytotech).`);
-        }
-
-        const getParams = new URLSearchParams({
-          text: texInput,
-          command: 'pdflatex',
-          force: 'true',
-          download: filename,
         });
-        const getResponse = await fetchWithTimeout(`${LATEX_TO_PDF_API_URL}?${getParams.toString()}`, {}, PDF_COMPILE_TIMEOUT_MS);
-        return parsePdfResponse(getResponse);
-      };
+      }
 
-      const tex = buildExamLatex({
-        title,
-        subtitle,
-        includeSolutions,
-        questions: apiQuestions,
-      });
+      const attempts: Array<{ label: string; tex: string }> = [
+        { label: 'standard', tex: primaryTex },
+        {
+          label: 'compile-safe',
+          tex: buildExamLatex({
+            title,
+            subtitle,
+            includeSolutions,
+            questions: enrichedQuestions,
+            compileSafeMode: true,
+          }),
+        },
+      ];
 
-      try {
-        pdfBuffer = await compileViaLatexApi(tex, apiQuestions);
-        if (apiFallbackImageStats) {
-          console.warn(
-            `[export-exam-pdf] API fallback compile mode=${apiFallbackImageStats.mode}; image resources attached ${apiFallbackImageStats.attached}/${apiFallbackImageStats.referenced}.`
-          );
-        }
-      } catch (apiCompileError: any) {
-        console.warn('[export-exam-pdf] API compile failed, retrying LaTeX-preserving safe mode', apiCompileError);
-        const safeTex = buildExamLatex({
-          title,
-          subtitle,
-          includeSolutions,
-          questions: apiQuestions,
-          compileSafeMode: true,
+      if (ENABLE_PLAIN_TEXT_PDF_FALLBACK) {
+        attempts.push({
+          label: 'plain-text',
+          tex: buildExamLatex({
+            title,
+            subtitle,
+            includeSolutions,
+            questions: enrichedQuestions,
+            compileSafeMode: true,
+            plainTextMode: true,
+          }),
         });
-        try {
-          pdfBuffer = await compileViaLatexApi(safeTex, apiQuestions);
-        } catch (apiSafeCompileError: any) {
-          if (ENABLE_PLAIN_TEXT_PDF_FALLBACK) {
-            console.warn('[export-exam-pdf] API safe-mode compile failed, retrying plain-text mode', apiSafeCompileError);
-            const plainTex = buildExamLatex({
-              title,
-              subtitle,
-              includeSolutions,
-              questions: apiQuestions,
-              compileSafeMode: true,
-              plainTextMode: true,
+      }
+
+      const compileErrors: string[] = [];
+      const compileOrder = resolveCompileOrder();
+
+      for (const attempt of attempts) {
+        for (const compiler of compileOrder) {
+          try {
+            const pdfBuffer = compiler === 'remote'
+              ? await compileTexToPdfRemote({ tex: attempt.tex, tempDir, questions: enrichedQuestions })
+              : await compileTexToPdfLocal({ tex: attempt.tex, tempDir });
+
+            const filename = `${baseFilename}.pdf`;
+            return new Response(pdfBuffer, {
+              status: 200,
+              headers: {
+                'Content-Type': 'application/pdf',
+                'Content-Disposition': `attachment; filename="${filename}"`,
+                'Cache-Control': 'no-store',
+              },
             });
-            usedPlainTextFallback = true;
-            pdfBuffer = await compileViaLatexApi(plainTex, apiQuestions);
-          } else {
-            const apiMessage = String(apiSafeCompileError?.message || apiSafeCompileError);
-            throw new Error(
-              `API compile failed after LaTeX-safe retries: ${apiMessage}\n\nLocal pdflatex diagnostic:\n${localCompileDiagnostic}`
-            );
+          } catch (attemptError) {
+            const message = attemptError instanceof Error ? attemptError.message : String(attemptError);
+            compileErrors.push(`[${attempt.label}:${compiler}] ${message}`);
           }
-        }
-        if (apiFallbackImageStats) {
-          console.warn(
-            `[export-exam-pdf] API fallback compile-safe mode=${apiFallbackImageStats.mode}; image resources attached ${apiFallbackImageStats.attached}/${apiFallbackImageStats.referenced}.`
-          );
         }
       }
+
+      const preview = primaryTex.slice(0, MAX_GET_TEX_LENGTH);
+      throw new Error(
+        [
+          'Failed to compile exam PDF.',
+          ...compileErrors,
+          `TeX preview (first ${MAX_GET_TEX_LENGTH} chars):`,
+          preview,
+          IS_VERCEL_RUNTIME ? `Runtime hint: running on Vercel, local pdflatex path is ${PDFLATEX_PATH}` : '',
+          LATEX_TO_PDF_API_MODE ? `LATEX_TO_PDF_API_MODE=${LATEX_TO_PDF_API_MODE}; LATEX_TO_PDF_API_URL=${LATEX_TO_PDF_API_URL}` : '',
+          LOCAL_PDFLATEX_MISSING_SENTINEL,
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      );
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
-
-    const pdfBody = new Uint8Array(pdfBuffer);
-
-    return new Response(pdfBody, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Cache-Control': 'no-store',
-        ...(usedApiFallback ? { 'X-PDF-Compile-Mode': 'api-fallback' } : {}),
-        ...(usedPlainTextFallback ? { 'X-PDF-Compile-Warning': 'plain-text-fallback-used' } : {}),
-        ...(imagesOmittedInFallback ? { 'X-PDF-Warning': 'Images omitted: local pdflatex unavailable on host runtime' } : {}),
-      },
-    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('[export-exam-pdf] Error:', message);
-    const actionable = message.includes('question images/diagrams')
-      ? `${message} Set PDFLATEX_PATH to a valid binary (for example /usr/bin/pdflatex) or install TeX Live on the server.`
-      : message;
     return Response.json(
-      { error: 'Failed to export exam PDF', details: actionable },
+      { error: 'Failed to export exam PDF', details: message },
       { status: 500 }
     );
-  } finally {
-    if (tempDir) {
-      await rm(tempDir, { recursive: true, force: true });
-    }
   }
 }

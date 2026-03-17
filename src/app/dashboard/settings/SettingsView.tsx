@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { BROWSE_YEARS as YEARS, SUBJECTS_BY_YEAR, CURRENT_EXAM_YEAR, MIN_EXAM_YEAR, getPaperKey } from '../syllabus-config';
 
 interface Props {
@@ -27,6 +28,8 @@ export default function SettingsView({
   handleSaveName, runSyllabusWorkflowTest, runSyllabusDotPointMapping, runSyllabusImport,
   submitPdfPair,
 }: Props) {
+  const router = useRouter();
+
   return (
                 <div className="flex-1 flex flex-col">
                   <div className="flex items-center justify-between p-6 border-b" style={{ borderColor: 'var(--clr-surface-tonal-a20)' }}>
@@ -82,19 +85,36 @@ export default function SettingsView({
                             </div>
                           </div>
                           <div>
-                            <label className="text-sm font-medium" style={{ color: 'var(--clr-primary-a50)' }}>Email</label>
-                            <p className="mt-1 text-lg" style={{ color: 'var(--clr-primary-a50)' }}>{userEmail}</p>
+                            <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Email</label>
+                            <p className="mt-1 text-lg" style={{ color: '#000000' }}>{userEmail}</p>
                           </div>
 
                           <div>
-                            <label className="text-sm font-medium" style={{ color: 'var(--clr-primary-a50)' }}>Date Joined</label>
-                            <p className="mt-1 text-lg" style={{ color: 'var(--clr-primary-a50)' }}>
+                            <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Date Joined</label>
+                            <p className="mt-1 text-lg" style={{ color: '#000000' }}>
                               {userCreatedAt ? new Date(userCreatedAt).toLocaleDateString('en-AU', {
                                 year: 'numeric',
                                 month: 'long',
                                 day: 'numeric'
                               }) : 'Not available'}
                             </p>
+                          </div>
+
+                          <div>
+                            <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Plan & Billing</label>
+                            <div className="mt-2">
+                              <button
+                                type="button"
+                                onClick={() => router.push('/dashboard/settings/pricing')}
+                                className="px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer"
+                                style={{
+                                  backgroundColor: 'var(--clr-primary-a50)',
+                                  color: 'var(--clr-surface-a0)',
+                                }}
+                              >
+                                Upgrade Plan
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
