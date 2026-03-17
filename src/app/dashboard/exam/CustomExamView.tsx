@@ -1,12 +1,13 @@
 'use client';
 
 import React from 'react';
-import { ArrowLeft, BookOpen, Eye, EyeOff, Info } from 'lucide-react';
+import { ArrowLeft, BookOpen, Download, Eye, EyeOff, Info } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { formatPartDividerPlaceholder, LatexText, QuestionTextWithDividers } from '../question-text-with-dividers';
 import { stripOuterBraces } from '../view-helpers';
 
 const DEFAULT_EXAM_SOURCE_LABEL = 'HSC';
+const RESPONSIVE_IMAGE_CLASS = 'mx-auto block h-auto max-h-[58vh] w-auto max-w-full object-contain';
 
 const getMcqOptions = (question: CustomExamQuestion) => (
   [
@@ -163,11 +164,15 @@ export default function CustomExamView({
   examTitle,
   examMeta,
   questions,
+  exportingPdf,
+  onExportPdf,
   onBack,
 }: {
   examTitle: string;
   examMeta?: string | null;
   questions: CustomExamQuestion[];
+  exportingPdf: 'exam' | 'solutions' | null;
+  onExportPdf: (includeSolutions: boolean) => Promise<void>;
   onBack: () => void;
 }) {
   const [showSolutions, setShowSolutions] = React.useState(false);
@@ -225,6 +230,27 @@ export default function CustomExamView({
           >
             {showSolutions ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             {showSolutions ? 'Hide Solutions' : 'View Solutions'}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => onExportPdf(false)}
+            disabled={exportingPdf !== null || !displayQuestions.length}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+          >
+            <Download className="h-4 w-4" />
+            {exportingPdf === 'exam' ? 'Exporting Questions PDF…' : 'Export Questions PDF'}
+          </button>
+          <button
+            type="button"
+            onClick={() => onExportPdf(true)}
+            disabled={exportingPdf !== null || !displayQuestions.length}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-900 bg-neutral-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+          >
+            <Download className="h-4 w-4" />
+            {exportingPdf === 'solutions' ? 'Exporting Solutions PDF…' : 'Export Questions + Solutions PDF'}
           </button>
         </div>
 
@@ -308,7 +334,8 @@ export default function CustomExamView({
                       <img
                         src={question.graph_image_data}
                         alt={`Question ${displayNumber} graph`}
-                        className={`mx-auto h-auto rounded-xl graph-image graph-image--${question.graph_image_size || 'medium'}`}
+                        loading="lazy"
+                        className={`${RESPONSIVE_IMAGE_CLASS} rounded-xl graph-image graph-image--${question.graph_image_size || 'medium'}`}
                       />
                     </div>
                   ) : null}
@@ -321,7 +348,12 @@ export default function CustomExamView({
                             <span className="pt-0.5 text-sm font-bold text-neutral-700">{option.label}.</span>
                             <div className="min-w-0 flex-1 font-serif text-neutral-900">
                               {option.image ? (
-                                <img src={option.image} alt={`Option ${option.label}`} className="max-w-full rounded-lg" />
+                                <img
+                                  src={option.image}
+                                  alt={`Option ${option.label}`}
+                                  loading="lazy"
+                                  className={`${RESPONSIVE_IMAGE_CLASS} max-h-[40vh] rounded-lg`}
+                                />
                               ) : (
                                 <LatexText text={option.text} />
                               )}
@@ -355,7 +387,12 @@ export default function CustomExamView({
                         <div className="space-y-4 text-neutral-800">
                           {question.sample_answer ? <QuestionTextWithDividers text={question.sample_answer} /> : null}
                           {question.sample_answer_image ? (
-                            <img src={question.sample_answer_image} alt="Sample solution" className="w-full rounded-xl border border-neutral-200 bg-white" />
+                            <img
+                              src={question.sample_answer_image}
+                              alt="Sample solution"
+                              loading="lazy"
+                              className={`${RESPONSIVE_IMAGE_CLASS} rounded-xl border border-neutral-200 bg-white p-1`}
+                            />
                           ) : null}
                         </div>
                       ) : (

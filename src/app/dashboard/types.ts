@@ -36,6 +36,10 @@ export type ExamBuilderParams = {
   intensity: number;
   topics: string[];
   cognitive: boolean;
+  /** Subtopic names to restrict questions to (empty = no restriction). */
+  subtopics?: string[];
+  /** Specific syllabus dot-point texts to restrict questions to (empty = no restriction). */
+  dotPoints?: string[];
 };
 
 export type PaperSummary = {
