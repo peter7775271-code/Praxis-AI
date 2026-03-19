@@ -3,8 +3,10 @@ import type Stripe from 'stripe';
 import { getStripeClient } from '@/lib/stripe';
 import {
   getUserByStripeCustomerId,
+  getUserByEmail,
   updateUserSubscription,
   resetUserPlanToFree,
+  addQuestionTokens,
   type SubscriptionPlan,
 } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/db';
@@ -55,14 +57,50 @@ export async function POST(request: NextRequest) {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
-        const userId = session.client_reference_id ?? (session.metadata?.userId as string | undefined);
+        const metadataUserId = session.client_reference_id ?? (session.metadata?.userId as string | undefined);
         const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
-        const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
-        const plan = (session.metadata?.plan as SubscriptionPlan | undefined) ?? 'free';
+        const customerEmail = session.customer_details?.email ?? session.customer_email;
 
-        if (userId && userId !== 'anonymous' && plan !== 'free') {
-          await updateUserSubscription(userId, plan, customerId ?? undefined, subscriptionId ?? undefined);
-          console.log(`[stripe/webhook] Activated ${plan} plan for user ${userId}`);
+        let resolvedUserId = metadataUserId;
+
+        if ((!resolvedUserId || resolvedUserId === 'anonymous') && customerEmail) {
+          const userByEmail = await getUserByEmail(customerEmail);
+          if (userByEmail?.id) {
+            resolvedUserId = userByEmail.id;
+          }
+        }
+
+        if (!resolvedUserId || resolvedUserId === 'anonymous') {
+          console.warn(`[stripe/webhook] checkout.session.completed skipped: unable to resolve user`);
+          break;
+        }
+
+        // Handle subscription mode (exam generation tokens)
+        if (session.mode === 'subscription') {
+          const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
+          const plan = (session.metadata?.plan as SubscriptionPlan | undefined) ?? 'free';
+
+          if (plan !== 'free') {
+            await updateUserSubscription(resolvedUserId, plan, customerId ?? undefined, subscriptionId ?? undefined);
+            console.log(`[stripe/webhook] Activated ${plan} plan for user ${resolvedUserId}`);
+          } else {
+            console.warn(`[stripe/webhook] checkout.session.completed (subscription): plan is free, skipping`);
+          }
+        }
+        // Handle payment mode (question tokens one-time purchase)
+        else if (session.mode === 'payment') {
+          const questionQuantity = session.metadata?.questionQuantity;
+          if (questionQuantity) {
+            const amount = Number(questionQuantity);
+            if (!isNaN(amount) && amount > 0) {
+              const newBalance = await addQuestionTokens(resolvedUserId, amount);
+              console.log(`[stripe/webhook] Added ${amount} question tokens to user ${resolvedUserId}. New balance: ${newBalance}`);
+            } else {
+              console.warn(`[stripe/webhook] checkout.session.completed (payment): invalid question quantity ${questionQuantity}`);
+            }
+          } else {
+            console.warn(`[stripe/webhook] checkout.session.completed (payment): missing questionQuantity in metadata`);
+          }
         }
 
         break;

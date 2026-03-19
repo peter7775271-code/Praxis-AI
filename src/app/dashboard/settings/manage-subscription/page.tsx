@@ -11,6 +11,8 @@ type SubscriptionInfo = {
   exportsRemaining: number | null;
   hasActiveSubscription: boolean;
   exportsResetAt: string | null;
+  stripeCancelAt?: string | null;
+  stripeCancelAtPeriodEnd?: boolean | null;
 };
 
 export default function ManageSubscriptionPage() {
@@ -19,26 +21,59 @@ export default function ManageSubscriptionPage() {
   const [portalLoading, setPortalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadSubscriptionInfo = async (): Promise<SubscriptionInfo | null> => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (!token) {
       setLoading(false);
-      return;
+      return null;
     }
 
-    fetch('/api/user/subscription', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.json())
-      .then((data: SubscriptionInfo & { error?: string }) => {
-        if (data.error) {
-          setError(data.error);
-        } else {
-          setSubInfo(data);
+    setError(null);
+
+    try {
+      const r = await fetch('/api/user/subscription', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = (await r.json()) as SubscriptionInfo & { error?: string };
+      if (data.error) {
+        setError(data.error);
+        return null;
+      }
+
+      setSubInfo(data);
+      return data;
+    } catch {
+      setError('Failed to load subscription info');
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async (attempt: number) => {
+      if (cancelled) return;
+      const latest = await loadSubscriptionInfo();
+
+      // If we still don't have Stripe cancellation scheduling info, retry briefly.
+      // (Portal changes can take a few seconds to reflect.)
+      if (!cancelled && attempt < 4) {
+        const hasCancelBanner = Boolean(latest?.stripeCancelAt);
+        if (!hasCancelBanner) {
+          window.setTimeout(() => void run(attempt + 1), 5000);
         }
-      })
-      .catch(() => setError('Failed to load subscription info'))
-      .finally(() => setLoading(false));
+      }
+    };
+
+    void run(0);
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openCustomerPortal = async () => {
@@ -125,8 +160,21 @@ export default function ManageSubscriptionPage() {
 
               {subInfo.hasActiveSubscription ? (
                 <div className="space-y-3">
+                  {subInfo.stripeCancelAt && subInfo.stripeCancelAtPeriodEnd && (
+                    <div
+                      className="rounded-xl border px-4 py-3 text-sm"
+                      style={{ backgroundColor: '#FEF2F2', borderColor: '#FECACA', color: '#991B1B', marginBottom: 4 }}
+                    >
+                      Your subscription will be cancelled on{' '}
+                      {new Date(subInfo.stripeCancelAt).toLocaleDateString('en-AU', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                      })}. You’ll keep access until then.
+                    </div>
+                  )}
                   <div>
-                    <p className="text-xs font-medium mb-1" style={{ color: '#64748B' }}>PDF Exports this month</p>
+                    <p className="text-xs font-medium mb-1" style={{ color: '#64748B' }}>Exam generation tokens this month</p>
                     <div className="flex items-center gap-3">
                       <div className="flex-1 rounded-full bg-gray-100 h-2 overflow-hidden">
                         <div
@@ -156,9 +204,26 @@ export default function ManageSubscriptionPage() {
                   )}
                 </div>
               ) : (
-                <p className="text-sm" style={{ color: '#64748B' }}>
-                  You are on the free plan. Upgrade to get monthly PDF exports.
-                </p>
+                <div className="space-y-2">
+                  {subInfo.stripeCancelAt && (
+                    <div
+                      className="rounded-xl border px-4 py-3 text-sm"
+                      style={{ backgroundColor: '#FEF2F2', borderColor: '#FECACA', color: '#991B1B' }}
+                    >
+                      {subInfo.stripeCancelAtPeriodEnd
+                        ? 'Your subscription has been scheduled for cancellation.'
+                        : 'Your subscription will be cancelled on'}{' '}
+                      {new Date(subInfo.stripeCancelAt).toLocaleDateString('en-AU', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                      })}.
+                    </div>
+                  )}
+                  <p className="text-sm" style={{ color: '#64748B' }}>
+                    You are on the free plan. Upgrade to get monthly exam generation tokens.
+                  </p>
+                </div>
               )}
             </div>
 
@@ -191,7 +256,7 @@ export default function ManageSubscriptionPage() {
                     Upgrade to Standard or Pro
                   </Link>
                   <p className="text-xs" style={{ color: '#94A3B8' }}>
-                    Choose a plan to unlock monthly PDF exports.
+                    Choose a plan to unlock monthly exam generation tokens.
                   </p>
                 </>
               )}

@@ -4,7 +4,6 @@ import { constants } from 'fs';
 import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
-import { verifyToken, getUserById, resetMonthlyExportsIfDue, incrementExportCount, PLAN_EXPORT_LIMITS } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 
@@ -1202,39 +1201,6 @@ const resolveCompileOrder = () => {
 
 export async function POST(request: Request) {
   try {
-    // --- Subscription quota check ---
-    const authHeader = (request as Request & { headers: Headers }).headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '') ?? null;
-    const decoded = token ? verifyToken(token) : null;
-    const authedUserId = decoded?.userId ?? null;
-
-    if (authedUserId) {
-      let user = await getUserById(authedUserId);
-      if (user) {
-        user = await resetMonthlyExportsIfDue(user);
-        const plan = user.plan ?? 'free';
-        const limit = PLAN_EXPORT_LIMITS[plan];
-        const used = user.exports_used_this_month ?? 0;
-
-        // Block if free plan (limit 0) or if the monthly limit has been reached
-        if (used >= limit) {
-          const message = limit === 0
-            ? 'PDF exports are not included in the free plan. Upgrade to Standard or Pro to export.'
-            : `Monthly export limit reached (${used}/${limit}). Upgrade your plan or wait until next month.`;
-          return Response.json(
-            {
-              error: message,
-              code: 'EXPORT_QUOTA_EXCEEDED',
-              exportsUsed: used,
-              exportsLimit: limit,
-            },
-            { status: 429 }
-          );
-        }
-      }
-    }
-    // --------------------------------
-
     const body = await request.json();
     const questions = Array.isArray(body?.questions) ? (body.questions as ExportQuestion[]) : [];
     const includeSolutions = Boolean(body?.includeSolutions);
@@ -1264,7 +1230,6 @@ export async function POST(request: Request) {
 
       if (wantsTex) {
         const filename = `${baseFilename}.tex`;
-        if (authedUserId) void incrementExportCount(authedUserId);
         return new Response(primaryTex, {
           status: 200,
           headers: {
@@ -1314,7 +1279,6 @@ export async function POST(request: Request) {
               : await compileTexToPdfLocal({ tex: attempt.tex, tempDir });
 
             const filename = `${baseFilename}.pdf`;
-            if (authedUserId) void incrementExportCount(authedUserId);
             return new Response(pdfBuffer, {
               status: 200,
               headers: {

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUser, createToken } from '@/lib/auth';
-import type { User } from '@/lib/auth';
-import { supabaseAdmin } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,21 +19,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Invalid email or password' },
         { status: 401 }
-      );
-    }
-
-    // Check if email is verified
-    const { data: dbUser } = await supabaseAdmin
-      .from('users')
-      .select('verified')
-      .eq('id', user.id)
-      .single();
-    const verifiedUser = dbUser as Pick<User, 'verified'> | null;
-
-    if (!verifiedUser?.verified) {
-      return NextResponse.json(
-        { error: 'Please verify your email first. Check your inbox for the verification link.' },
-        { status: 403 }
       );
     }
 

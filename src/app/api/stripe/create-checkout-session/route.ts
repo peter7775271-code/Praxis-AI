@@ -12,7 +12,18 @@ const PRICE_ID_BY_PLAN: Record<PlanKey, string | undefined> = {
 export async function POST(request: NextRequest) {
   try {
     const token = request.headers.get('authorization')?.replace('Bearer ', '');
-    const decoded = token ? verifyToken(token) : null;
+    if (!token) {
+      return NextResponse.json({ error: 'Authentication required to start checkout. Please sign in.' }, { status: 401 });
+    }
+
+    const decoded = verifyToken(token);
+
+    if (!decoded?.userId) {
+      return NextResponse.json(
+        { error: 'Your session expired. Please sign in again to start checkout.' },
+        { status: 401 }
+      );
+    }
 
     const body = (await request.json()) as { plan?: string };
     const plan = body.plan as PlanKey | undefined;
@@ -34,7 +45,7 @@ export async function POST(request: NextRequest) {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
     const stripe = getStripeClient();
 
-    const user = decoded ? await getUserById(decoded.userId) : null;
+    const user = await getUserById(decoded.userId);
 
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
@@ -43,11 +54,11 @@ export async function POST(request: NextRequest) {
       cancel_url: `${baseUrl}/dashboard/settings/pricing?checkout=cancelled`,
       allow_promotion_codes: true,
       billing_address_collection: 'auto',
-      client_reference_id: decoded?.userId,
+      client_reference_id: decoded.userId,
       customer_email: user?.email,
       metadata: {
         plan,
-        userId: decoded?.userId ?? 'anonymous',
+        userId: decoded.userId,
       },
     });
 

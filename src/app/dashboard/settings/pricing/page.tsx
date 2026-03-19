@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 type BillingPlan = 'standard' | 'pro';
@@ -26,7 +26,8 @@ const plans: {
       'Filter by topic, subtopic and dot point',
       'LaTeX questions + worked solutions',
       'Images included where needed',
-      '30 PDF exports / month',
+      '30 exam generation tokens / month',
+      'Unlimited PDF exports after generation',
     ],
     featured: false,
   },
@@ -39,7 +40,8 @@ const plans: {
     features: [
       'Everything in Standard',
       'Both year levels included',
-      '100 PDF exports / month',
+      '100 exam generation tokens / month',
+      'Unlimited PDF exports after generation',
       'Unlimited tutor accounts',
       'Priority support',
     ],
@@ -47,15 +49,18 @@ const plans: {
   },
 ];
 
-export default function DashboardPricingPage() {
+function PricingPageContent() {
   const searchParams = useSearchParams();
   const checkoutStatus = searchParams.get('checkout');
+  const checkoutSessionId = searchParams.get('session_id');
+  const isOnboarding = searchParams.get('onboarding') === '1';
   const [pendingPlan, setPendingPlan] = useState<BillingPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const successMessage = useMemo(() => {
     if (checkoutStatus === 'success') {
-      return 'Checkout completed. Your subscription will be updated once payment is confirmed.';
+      return 'Checkout completed. Confirming your subscription...';
     }
 
     if (checkoutStatus === 'cancelled') {
@@ -65,22 +70,84 @@ export default function DashboardPricingPage() {
     return null;
   }, [checkoutStatus]);
 
+  useEffect(() => {
+    if (checkoutStatus !== 'success' || !checkoutSessionId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const confirmCheckout = async () => {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        const response = await fetch(`/api/stripe/confirm-checkout?session_id=${encodeURIComponent(checkoutSessionId)}`, {
+          method: 'GET',
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+
+        const data = (await response.json()) as { error?: string; plan?: string; message?: string };
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          const message = data.error || data.message || 'Could not confirm your subscription yet.';
+          setError(message);
+          setSyncMessage(null);
+          return;
+        }
+
+        const planName = data.plan ? data.plan.charAt(0).toUpperCase() + data.plan.slice(1) : 'paid';
+        setSyncMessage(`Your ${planName} plan is now active.`);
+        setError(null);
+      } catch (confirmError) {
+        if (cancelled) {
+          return;
+        }
+
+        const message = confirmError instanceof Error
+          ? confirmError.message
+          : 'Could not confirm your subscription yet.';
+        setError(message);
+        setSyncMessage(null);
+      }
+    };
+
+    void confirmCheckout();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [checkoutStatus, checkoutSessionId]);
+
   const startCheckout = async (plan: BillingPlan) => {
     setPendingPlan(plan);
     setError(null);
 
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      if (!token) {
+        setError('You need to sign in before starting checkout. Please log in again.');
+        setPendingPlan(null);
+        return;
+      }
+
       const response = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ plan }),
       });
 
       const data = (await response.json()) as { error?: string; url?: string };
+
+      if (response.status === 401) {
+        throw new Error(data.error || 'Your session expired. Please sign in again.');
+      }
 
       if (!response.ok || !data.url) {
         throw new Error(data.error || 'Could not start checkout. Please try again.');
@@ -104,25 +171,45 @@ export default function DashboardPricingPage() {
             <p className="text-sm" style={{ color: '#5D6B82' }}>Billing</p>
             <h1 className="text-3xl font-semibold" style={{ color: '#0F172A' }}>Choose your plan</h1>
           </div>
-          <Link
-            href="/dashboard/settings"
-            className="rounded-lg px-4 py-2 text-sm font-medium"
-            style={{
-              backgroundColor: '#FFFFFF',
-              color: '#1E293B',
-              border: '1px solid #CBD5E1',
-            }}
-          >
-            Back to settings
-          </Link>
+          {isOnboarding ? (
+            <Link
+              href="/dashboard"
+              className="rounded-lg px-4 py-2 text-sm font-medium"
+              style={{
+                backgroundColor: '#FFFFFF',
+                color: '#1E293B',
+                border: '1px solid #CBD5E1',
+              }}
+            >
+              Continue with Free
+            </Link>
+          ) : (
+            <Link
+              href="/dashboard/settings"
+              className="rounded-lg px-4 py-2 text-sm font-medium"
+              style={{
+                backgroundColor: '#FFFFFF',
+                color: '#1E293B',
+                border: '1px solid #CBD5E1',
+              }}
+            >
+              Back to settings
+            </Link>
+          )}
         </div>
+
+        {isOnboarding && (
+          <div className="mb-4 rounded-xl border px-4 py-3 text-sm" style={{ backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', color: '#065F46' }}>
+            You are on the Free plan by default (3 exam creations per month, 0 question tokens). Upgrade anytime.
+          </div>
+        )}
 
         {successMessage && (
           <div
             className="mb-4 rounded-xl border px-4 py-3 text-sm"
             style={{ backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', color: '#065F46' }}
           >
-            {successMessage}
+            {syncMessage || successMessage}
           </div>
         )}
 
@@ -217,5 +304,21 @@ export default function DashboardPricingPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+export default function DashboardPricingPage() {
+  return (
+    <Suspense
+      fallback={(
+        <main className="min-h-screen px-5 py-10 md:px-10" style={{ backgroundColor: '#F3F7FC' }}>
+          <div className="mx-auto w-full max-w-5xl">
+            <p className="text-sm" style={{ color: '#5D6B82' }}>Loading pricing…</p>
+          </div>
+        </main>
+      )}
+    >
+      <PricingPageContent />
+    </Suspense>
   );
 }

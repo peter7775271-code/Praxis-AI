@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   ShieldCheck,
 } from "lucide-react";
+import { SUBJECTS_BY_YEAR, BROWSE_GRADES_SENIOR } from "../dashboard/syllabus-config";
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
@@ -103,8 +104,22 @@ export default function SignUpPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [fullName, setFullName] = useState("");
+  const [companyName, setCompanyName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [defaultGrade, setDefaultGrade] = useState<'Year 11' | 'Year 12'>('Year 12');
+  const [defaultSubject, setDefaultSubject] = useState<string>('Mathematics Advanced');
+
+  const defaultSubjectsForGrade = useMemo(
+    () => SUBJECTS_BY_YEAR[defaultGrade] ?? [],
+    [defaultGrade]
+  );
+
+  useEffect(() => {
+    if (!defaultSubjectsForGrade.includes(defaultSubject)) {
+      setDefaultSubject(defaultSubjectsForGrade[0] ?? 'Mathematics Advanced');
+    }
+  }, [defaultGrade, defaultSubjectsForGrade, defaultSubject]);
 
   const toggleView = () => {
     setView((prev) => (prev === "signin" ? "signup" : "signin"));
@@ -124,7 +139,14 @@ export default function SignUpPage() {
         const response = await fetch("/api/auth/signup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: fullName, email, password }),
+          body: JSON.stringify({
+            name: fullName,
+            companyName,
+            email,
+            password,
+            defaultGrade,
+            defaultSubject,
+          }),
         });
 
         const data = await response.json();
@@ -136,7 +158,7 @@ export default function SignUpPage() {
         localStorage.setItem("token", data.token);
         localStorage.setItem("user", JSON.stringify(data.user));
         setSuccess("Account created successfully.");
-        router.push("/dashboard");
+        router.push("/dashboard/settings/pricing?onboarding=1");
         return;
       }
 
@@ -231,6 +253,58 @@ export default function SignUpPage() {
                       onChange={(e) => setFullName(e.target.value)}
                       disabled={isLoading}
                     />
+                  </div>
+
+                  <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest ml-1 mt-2" htmlFor="company">
+                    Company Name
+                  </label>
+                  <div className="input-field relative flex items-center bg-neutral-50/50 border border-neutral-100 rounded-2xl">
+                    <Zap size={18} className="absolute left-4 text-neutral-300" />
+                    <input
+                      id="company"
+                      type="text"
+                      placeholder="Your organisation"
+                      className="w-full bg-transparent py-4 pl-12 pr-4 text-sm focus:outline-none placeholder:text-neutral-300"
+                      required
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      disabled={isLoading}
+                    />
+                  </div>
+
+                  <div className="space-y-2 mt-2">
+                    <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest ml-1" htmlFor="default-grade">
+                      Default Exam Year
+                    </label>
+                    <select
+                      id="default-grade"
+                      value={defaultGrade}
+                      onChange={(e) => setDefaultGrade(e.target.value as 'Year 11' | 'Year 12')}
+                      className="w-full bg-neutral-50/50 border border-neutral-100 rounded-2xl py-4 px-4 text-sm focus:outline-none"
+                      disabled={isLoading}
+                    >
+                      {BROWSE_GRADES_SENIOR.map((g) => (
+                        <option key={g} value={g}>{g}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest ml-1" htmlFor="default-subject">
+                      Default Subject
+                    </label>
+                    <select
+                      id="default-subject"
+                      value={defaultSubject}
+                      onChange={(e) => setDefaultSubject(e.target.value)}
+                      className="w-full bg-neutral-50/50 border border-neutral-100 rounded-2xl py-4 px-4 text-sm focus:outline-none"
+                      disabled={isLoading}
+                      required
+                    >
+                      {defaultSubjectsForGrade.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               )}

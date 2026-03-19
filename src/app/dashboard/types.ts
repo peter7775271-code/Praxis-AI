@@ -9,6 +9,7 @@ export type DashboardViewMode =
   | 'history'
   | 'syllabus'
   | 'settings'
+  | 'settings-dev'
   | 'dev-questions'
   | 'logs'
   | 'papers'

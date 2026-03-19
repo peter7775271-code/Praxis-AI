@@ -358,6 +358,12 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [userExportsLimit, setUserExportsLimit] = useState<number>(0);
   const [userExportsResetAt, setUserExportsResetAt] = useState<string | null>(null);
   const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
+  const [userQuestionTokensBalance, setUserQuestionTokensBalance] = useState<number>(0);
+  const [userCompanyName, setUserCompanyName] = useState<string | null>(null);
+  const [userDefaultGrade, setUserDefaultGrade] = useState<string>('Year 12');
+  const [userDefaultSubject, setUserDefaultSubject] = useState<string>('Mathematics Advanced');
+  const [userStripeCancelAt, setUserStripeCancelAt] = useState<string | null>(null);
+  const [userStripeCancelAtPeriodEnd, setUserStripeCancelAtPeriodEnd] = useState<boolean | null>(null);
   const [paperQuestions, setPaperQuestions] = useState<Question[]>([]);
   const [paperIndex, setPaperIndex] = useState(0);
   const [showPaperQuestionNavigator, setShowPaperQuestionNavigator] = useState(false);
@@ -1644,13 +1650,32 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
           headers: { Authorization: `Bearer ${savedToken}` },
         })
           .then((r) => r.json())
-          .then((sub: { plan?: string; exportsUsed?: number; exportsLimit?: number; exportsResetAt?: string | null; hasActiveSubscription?: boolean; error?: string }) => {
+          .then((sub: {
+            plan?: string;
+            exportsUsed?: number;
+            exportsLimit?: number;
+            exportsResetAt?: string | null;
+            hasActiveSubscription?: boolean;
+            questionTokensBalance?: number;
+            companyName?: string | null;
+            defaultGrade?: string | null;
+            defaultSubject?: string | null;
+            stripeCancelAt?: string | null;
+            stripeCancelAtPeriodEnd?: boolean | null;
+            error?: string;
+          }) => {
             if (sub && !sub.error) {
               setUserPlan(sub.plan ?? 'free');
               setUserExportsUsed(sub.exportsUsed ?? 0);
               setUserExportsLimit(sub.exportsLimit ?? 0);
               setUserExportsResetAt(sub.exportsResetAt ?? null);
               setHasActiveSubscription(sub.hasActiveSubscription ?? false);
+              setUserQuestionTokensBalance(sub.questionTokensBalance ?? 0);
+              setUserCompanyName(sub.companyName ?? null);
+              setUserDefaultGrade(sub.defaultGrade ?? 'Year 12');
+              setUserDefaultSubject(sub.defaultSubject ?? 'Mathematics Advanced');
+              setUserStripeCancelAt(sub.stripeCancelAt ?? null);
+              setUserStripeCancelAtPeriodEnd(sub.stripeCancelAtPeriodEnd ?? null);
             }
           })
           .catch(() => undefined);
@@ -1663,6 +1688,43 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   useEffect(() => {
     setUserNameDraft(userName);
   }, [userName]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get('checkout');
+    const sessionId = params.get('session_id');
+    const type = params.get('type');
+
+    if (checkout === 'success' && sessionId && type === 'questions') {
+      const handleCheckoutSuccess = async () => {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        try {
+          const response = await fetch('/api/stripe/confirm-checkout', {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+
+          const data = (await response.json().catch(() => ({}))) as any;
+
+          if (data?.ok && data?.type === 'payment' && typeof data?.questionTokensBalance === 'number') {
+            setUserQuestionTokensBalance(data.questionTokensBalance);
+          }
+        } catch (error) {
+          console.error('Failed to confirm checkout:', error);
+        }
+      };
+
+      handleCheckoutSuccess();
+
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2275,6 +2337,36 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     } finally {
       setTimeout(() => setIsSavingName(false), 400);
     }
+  };
+
+  const handleSaveDefaultPreset = async (grade: string, subject: string) => {
+    if (typeof window === 'undefined') {
+      return { ok: false, message: 'Not available in this environment.' };
+    }
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      return { ok: false, message: 'You need to sign in again.' };
+    }
+
+    const response = await fetch('/api/user/update-default-preset', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ grade, subject }),
+    });
+
+    const data = (await response.json().catch(() => ({}))) as { error?: string; ok?: boolean };
+
+    if (!response.ok) {
+      return { ok: false, message: data.error || 'Failed to save defaults' };
+    }
+
+    setUserDefaultGrade(grade);
+    setUserDefaultSubject(subject);
+    return { ok: true as const };
   };
 
   const saveAttempt = async () => {
@@ -4248,6 +4340,91 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   };
 
+  const consumeExamGenerationToken = async (): Promise<{ ok: boolean; message?: string; hasActiveSubscription?: boolean }> => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!token) {
+      return { ok: false, message: 'Please sign in again before generating an exam.' };
+    }
+
+    try {
+      const response = await fetch('/api/user/consume-exam-generation-token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        tokensUsed?: number;
+        tokensLimit?: number;
+        tokensResetAt?: string | null;
+        hasActiveSubscription?: boolean;
+      };
+
+      if (!response.ok) {
+        return { ok: false, message: data.error || 'Unable to use an exam generation token.' };
+      }
+
+      if (typeof data.tokensUsed === 'number') {
+        setUserExportsUsed(data.tokensUsed);
+      }
+      if (typeof data.tokensLimit === 'number') {
+        setUserExportsLimit(data.tokensLimit);
+      }
+      if (typeof data.tokensResetAt !== 'undefined') {
+        setUserExportsResetAt(data.tokensResetAt ?? null);
+      }
+      if (typeof data.hasActiveSubscription === 'boolean') {
+        setHasActiveSubscription(data.hasActiveSubscription);
+      }
+
+      return { ok: true, hasActiveSubscription: Boolean(data.hasActiveSubscription) };
+    } catch (err) {
+      return {
+        ok: false,
+        message: getFetchErrorMessage(err, 'Unable to use an exam generation token.'),
+      };
+    }
+  };
+
+  const consumeQuestionTokens = async (amount: number): Promise<{ ok: boolean; message?: string; remaining?: number }> => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!token) {
+      return { ok: false, message: 'Please sign in again before generating questions.' };
+    }
+
+    try {
+      const response = await fetch('/api/user/consume-question-tokens', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ amount }),
+      });
+
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        tokensRemaining?: number;
+        tokensShortby?: number;
+      };
+
+      if (!response.ok) {
+        return { ok: false, message: data.error || 'Unable to consume question tokens.', remaining: data.tokensRemaining };
+      }
+
+      setUserQuestionTokensBalance(data.tokensRemaining ?? 0);
+      return { ok: true, remaining: data.tokensRemaining };
+    } catch (err) {
+      return {
+        ok: false,
+        message: getFetchErrorMessage(err, 'Unable to consume question tokens.'),
+      };
+    }
+  };
+
   const initializeCustomExam = async (params: ExamBuilderParams) => {
     setIsInitializingExam(true);
     try {
@@ -4362,6 +4539,14 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
           message: 'Exam is too large to store for navigation. Reduce question count or disable all-topic mode.',
         };
       }
+
+      const examGenTokenResult = await consumeExamGenerationToken();
+      if (!examGenTokenResult.ok) {
+        return { ok: false, message: examGenTokenResult.message || 'Unable to use an exam generation token.' };
+      }
+      // Exam Architect creation is gated by the monthly exam-generation token counter.
+      // Per-question tokens (question_tokens_balance) are used for question-generation flows,
+      // and should not block exam generation when they are at 0.
 
       setActivePaper(customPaper);
       setPaperQuestions(finalSelectionWithSharedImages);
@@ -4777,6 +4962,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                 <ExamBuilderView
                   onInitializeExam={initializeCustomExam}
                   isInitializing={isInitializingExam}
+                  initialSubject={userDefaultSubject}
+                  initialGrade={userDefaultGrade as any}
                 />
               )}
               {viewMode === 'exam' && (
@@ -4908,7 +5095,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
               )}
 
               {/* Settings Page */}
-              {viewMode === 'settings' && (
+              {(viewMode === 'settings' || viewMode === 'settings-dev') && (
                 <SettingsView
                   question={question}
                   error={error}
@@ -4953,7 +5140,15 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                   userExportsLimit={userExportsLimit}
                   userExportsResetAt={userExportsResetAt}
                   hasActiveSubscription={hasActiveSubscription}
+                  userQuestionTokensBalance={userQuestionTokensBalance}
+                  userDefaultGrade={userDefaultGrade}
+                  userDefaultSubject={userDefaultSubject}
+                  userCompanyName={userCompanyName}
+                  userStripeCancelAt={userStripeCancelAt}
+                  userStripeCancelAtPeriodEnd={userStripeCancelAtPeriodEnd}
+                  onSaveDefaultPreset={handleSaveDefaultPreset}
                   isDevMode={isDevMode}
+                  showDeveloperTools={viewMode === 'settings-dev'}
                   loadingQuestions={loadingQuestions}
                   setExamPdfFile={setExamPdfFile}
                   setCriteriaPdfFile={setCriteriaPdfFile}
