@@ -20,6 +20,7 @@ export default function SettingsView({
   syllabusWorkflowTestOutput, syllabusImportText, syllabusImportSubject, syllabusImportGrade,
   syllabusImporting, syllabusImportResult, syllabusImportStatus, userEmail, userCreatedAt,
   userName, userNameDraft, isSavingName, isDevMode, loadingQuestions,
+  userPlan, userExportsUsed, userExportsLimit, userExportsResetAt, hasActiveSubscription,
   setExamPdfFile, setCriteriaPdfFile, setExamImageFiles, setPdfGrade, setPdfYear, setPdfSubject,
   setPdfOverwrite, setPdfGenerateCriteria, setPdfAutoGroupSubparts, setPdfSchoolName, setPdfPaperNumber,
   setSelectedSyllabusMappingPaper, setSyllabusWorkflowTestInput, setSyllabusImportText,
@@ -174,18 +175,55 @@ export default function SettingsView({
 
                           <div>
                             <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Plan & Billing</label>
-                            <div className="mt-2">
-                              <button
-                                type="button"
-                                onClick={() => router.push('/dashboard/settings/pricing')}
-                                className="px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer"
-                                style={{
-                                  backgroundColor: 'var(--clr-primary-a50)',
-                                  color: 'var(--clr-surface-a0)',
-                                }}
-                              >
-                                Upgrade Plan
-                              </button>
+                            <div className="mt-2 space-y-2">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="inline-block px-3 py-1 rounded-full text-xs font-semibold"
+                                  style={{
+                                    backgroundColor: userPlan === 'pro' ? '#EDE9FE' : userPlan === 'standard' ? '#E5F1FF' : 'var(--clr-surface-a20)',
+                                    color: userPlan === 'pro' ? '#6D28D9' : userPlan === 'standard' ? '#185FA5' : 'var(--clr-surface-a50)',
+                                  }}
+                                >
+                                  {userPlan === 'free' ? 'Free' : userPlan === 'standard' ? 'Standard' : 'Pro'} Plan
+                                </span>
+                                {hasActiveSubscription && userExportsLimit > 0 && (
+                                  <span className="text-sm" style={{ color: 'var(--clr-surface-a40)' }}>
+                                    {userExportsUsed} / {userExportsLimit} exports used this month
+                                  </span>
+                                )}
+                              </div>
+                              {hasActiveSubscription && userExportsResetAt && (
+                                <p className="text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
+                                  Resets {new Date(userExportsResetAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                </p>
+                              )}
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => router.push('/dashboard/settings/pricing')}
+                                  className="px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer"
+                                  style={{
+                                    backgroundColor: 'var(--clr-primary-a50)',
+                                    color: 'var(--clr-surface-a0)',
+                                  }}
+                                >
+                                  {hasActiveSubscription ? 'Change Plan' : 'Upgrade Plan'}
+                                </button>
+                                {hasActiveSubscription && (
+                                  <button
+                                    type="button"
+                                    onClick={() => router.push('/dashboard/settings/manage-subscription')}
+                                    className="px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer"
+                                    style={{
+                                      backgroundColor: 'var(--clr-surface-a20)',
+                                      color: 'var(--clr-primary-a50)',
+                                      border: '1px solid var(--clr-surface-tonal-a20)',
+                                    }}
+                                  >
+                                    Manage Subscription
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -193,6 +231,45 @@ export default function SettingsView({
 
                       {isDevMode && (
                         <>
+                        <div
+                          className="p-6 rounded-2xl border mt-6"
+                          style={{
+                            backgroundColor: 'var(--clr-surface-a10)',
+                            borderColor: 'var(--clr-surface-tonal-a20)',
+                          }}
+                        >
+                          <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--clr-primary-a50)' }}>Subscription Testing (Dev)</h2>
+                          <p className="text-sm mb-4" style={{ color: 'var(--clr-surface-a40)' }}>
+                            Use the <code>/api/dev/set-plan</code> endpoint from the browser console to change your plan for testing:
+                          </p>
+                          <pre
+                            className="rounded-lg p-3 text-xs overflow-x-auto mb-3"
+                            style={{ backgroundColor: 'var(--clr-surface-a0)', color: 'var(--clr-primary-a50)', border: '1px solid var(--clr-surface-tonal-a20)' }}
+                          >{`// Set plan to 'standard' (30 exports/month):
+await fetch('/api/dev/set-plan', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    Authorization: 'Bearer ' + localStorage.getItem('token')
+  },
+  body: JSON.stringify({ plan: 'standard' })
+}).then(r => r.json()).then(console.log);
+
+// Set plan to 'pro' (100 exports/month):
+// body: { plan: 'pro' }
+
+// Set exports used to 29 (1 left on standard):
+// body: { plan: 'standard', exportsUsed: 29 }
+
+// Reset to free plan:
+// body: { plan: 'free' }
+
+// Reset exports only (keep plan):
+// body: { resetExports: true }`}</pre>
+                          <p className="text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
+                            Only available in non-production environments.
+                          </p>
+                        </div>
                         <div
                           className="p-6 rounded-2xl border mt-6"
                           style={{

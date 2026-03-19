@@ -353,6 +353,11 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [userName, setUserName] = useState<string>('');
   const [userNameDraft, setUserNameDraft] = useState<string>('');
   const [isSavingName, setIsSavingName] = useState(false);
+  const [userPlan, setUserPlan] = useState<string>('free');
+  const [userExportsUsed, setUserExportsUsed] = useState<number>(0);
+  const [userExportsLimit, setUserExportsLimit] = useState<number>(0);
+  const [userExportsResetAt, setUserExportsResetAt] = useState<string | null>(null);
+  const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
   const [paperQuestions, setPaperQuestions] = useState<Question[]>([]);
   const [paperIndex, setPaperIndex] = useState(0);
   const [showPaperQuestionNavigator, setShowPaperQuestionNavigator] = useState(false);
@@ -1631,6 +1636,25 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
       // Check if user is dev
       setIsDevMode(normalizedEmail === 'peter7775271@gmail.com');
+
+      // Load subscription info
+      const savedToken = localStorage.getItem('token');
+      if (savedToken) {
+        fetch('/api/user/subscription', {
+          headers: { Authorization: `Bearer ${savedToken}` },
+        })
+          .then((r) => r.json())
+          .then((sub: any) => {
+            if (sub && !sub.error) {
+              setUserPlan(sub.plan ?? 'free');
+              setUserExportsUsed(sub.exportsUsed ?? 0);
+              setUserExportsLimit(sub.exportsLimit ?? 0);
+              setUserExportsResetAt(sub.exportsResetAt ?? null);
+              setHasActiveSubscription(sub.hasActiveSubscription ?? false);
+            }
+          })
+          .catch(() => undefined);
+      }
     } catch (e) {
       console.error('Error parsing user:', e);
     }
@@ -2378,9 +2402,13 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     if (!questions.length) {
       throw new Error('No questions available to export.');
     }
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     const response = await fetch('/api/hsc/export-exam-pdf', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({
         title,
         subtitle,
@@ -4920,6 +4948,11 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                   userName={userName}
                   userNameDraft={userNameDraft}
                   isSavingName={isSavingName}
+                  userPlan={userPlan}
+                  userExportsUsed={userExportsUsed}
+                  userExportsLimit={userExportsLimit}
+                  userExportsResetAt={userExportsResetAt}
+                  hasActiveSubscription={hasActiveSubscription}
                   isDevMode={isDevMode}
                   loadingQuestions={loadingQuestions}
                   setExamPdfFile={setExamPdfFile}

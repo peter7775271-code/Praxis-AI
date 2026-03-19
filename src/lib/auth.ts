@@ -2,6 +2,20 @@ import bcryptjs from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { supabaseAdmin } from './db';
 
+export type SubscriptionPlan = 'free' | 'standard' | 'pro';
+
+export const PLAN_EXPORT_LIMITS: Record<SubscriptionPlan, number> = {
+  free: 0,
+  standard: 30,
+  pro: 100,
+};
+
+export const PLAN_DISPLAY_NAMES: Record<SubscriptionPlan, string> = {
+  free: 'Free',
+  standard: 'Standard',
+  pro: 'Pro',
+};
+
 export interface User {
   id: string;
   email: string;
@@ -9,6 +23,11 @@ export interface User {
   created_at: string;
   verified?: boolean;
   verification_token?: string;
+  plan?: SubscriptionPlan;
+  stripe_customer_id?: string;
+  stripe_subscription_id?: string;
+  exports_used_this_month?: number;
+  exports_reset_at?: string | null;
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -36,7 +55,7 @@ export function verifyToken(token: string): { userId: string } | null {
 export async function getUserByEmail(email: string): Promise<User | null> {
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('id, email, name, created_at, verified, verification_token')
+    .select('id, email, name, created_at, verified, verification_token, plan, stripe_customer_id, stripe_subscription_id, exports_used_this_month, exports_reset_at')
     .eq('email', email)
     .single();
 
@@ -50,8 +69,22 @@ export async function getUserByEmail(email: string): Promise<User | null> {
 export async function getUserById(id: string): Promise<User | null> {
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('id, email, name, created_at, verified, verification_token')
+    .select('id, email, name, created_at, verified, verification_token, plan, stripe_customer_id, stripe_subscription_id, exports_used_this_month, exports_reset_at')
     .eq('id', id)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data as User;
+}
+
+export async function getUserByStripeCustomerId(customerId: string): Promise<User | null> {
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .select('id, email, name, created_at, verified, plan, stripe_customer_id, stripe_subscription_id, exports_used_this_month, exports_reset_at')
+    .eq('stripe_customer_id', customerId)
     .single();
 
   if (error || !data) {
@@ -133,5 +166,92 @@ export async function updateUserPassword(email: string, newPassword: string): Pr
 
   if (error) {
     throw new Error(error.message || 'Failed to update password');
+  }
+}
+
+export async function updateUserSubscription(
+  userId: string,
+  plan: SubscriptionPlan,
+  stripeCustomerId?: string,
+  stripeSubscriptionId?: string,
+): Promise<void> {
+  const resetAt = new Date();
+  resetAt.setMonth(resetAt.getMonth() + 1);
+
+  const updates: Record<string, unknown> = {
+    plan,
+    exports_used_this_month: 0,
+    exports_reset_at: resetAt.toISOString(),
+  };
+
+  if (stripeCustomerId) updates.stripe_customer_id = stripeCustomerId;
+  if (stripeSubscriptionId) updates.stripe_subscription_id = stripeSubscriptionId;
+
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update(updates)
+    .eq('id', userId);
+
+  if (error) {
+    throw new Error(error.message || 'Failed to update subscription');
+  }
+}
+
+export async function resetUserPlanToFree(userId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({
+      plan: 'free',
+      stripe_subscription_id: null,
+      exports_used_this_month: 0,
+      exports_reset_at: null,
+    })
+    .eq('id', userId);
+
+  if (error) {
+    throw new Error(error.message || 'Failed to reset plan');
+  }
+}
+
+export async function resetMonthlyExportsIfDue(user: User): Promise<User> {
+  const resetAt = user.exports_reset_at ? new Date(user.exports_reset_at) : null;
+  if (resetAt && new Date() >= resetAt) {
+    const nextResetAt = new Date(resetAt);
+    nextResetAt.setMonth(nextResetAt.getMonth() + 1);
+
+    await supabaseAdmin
+      .from('users')
+      .update({
+        exports_used_this_month: 0,
+        exports_reset_at: nextResetAt.toISOString(),
+      })
+      .eq('id', user.id);
+
+    return {
+      ...user,
+      exports_used_this_month: 0,
+      exports_reset_at: nextResetAt.toISOString(),
+    };
+  }
+
+  return user;
+}
+
+export async function incrementExportCount(userId: string): Promise<void> {
+  const { data: user } = await supabaseAdmin
+    .from('users')
+    .select('exports_used_this_month')
+    .eq('id', userId)
+    .single();
+
+  const current = Number((user as { exports_used_this_month?: number } | null)?.exports_used_this_month ?? 0);
+
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({ exports_used_this_month: current + 1 })
+    .eq('id', userId);
+
+  if (error) {
+    console.error('Failed to increment export count:', error.message);
   }
 }
