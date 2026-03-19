@@ -33,6 +33,7 @@ export interface User {
   exports_used_this_month?: number;
   exports_reset_at?: string | null;
   question_tokens_balance?: number;
+  standard_year_level?: 'Year 11' | 'Year 12' | null;
   stripeCancelAt?: string | null;
   stripeCancelAtPeriodEnd?: boolean | null;
 }
@@ -62,7 +63,7 @@ export function verifyToken(token: string): { userId: string } | null {
 export async function getUserByEmail(email: string): Promise<User | null> {
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('id, email, name, company_name, created_at, verified, verification_token, plan, default_grade, default_subject, stripe_customer_id, stripe_subscription_id, exports_used_this_month, exports_reset_at, question_tokens_balance')
+    .select('id, email, name, company_name, created_at, verified, verification_token, plan, default_grade, default_subject, stripe_customer_id, stripe_subscription_id, exports_used_this_month, exports_reset_at, question_tokens_balance, standard_year_level')
     .eq('email', email)
     .single();
 
@@ -76,7 +77,7 @@ export async function getUserByEmail(email: string): Promise<User | null> {
 export async function getUserById(id: string): Promise<User | null> {
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('id, email, name, company_name, created_at, verified, verification_token, plan, default_grade, default_subject, stripe_customer_id, stripe_subscription_id, exports_used_this_month, exports_reset_at, question_tokens_balance')
+    .select('id, email, name, company_name, created_at, verified, verification_token, plan, default_grade, default_subject, stripe_customer_id, stripe_subscription_id, exports_used_this_month, exports_reset_at, question_tokens_balance, standard_year_level')
     .eq('id', id)
     .single();
 
@@ -90,7 +91,7 @@ export async function getUserById(id: string): Promise<User | null> {
 export async function getUserByStripeCustomerId(customerId: string): Promise<User | null> {
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('id, email, name, company_name, created_at, verified, plan, default_grade, default_subject, stripe_customer_id, stripe_subscription_id, exports_used_this_month, exports_reset_at, question_tokens_balance')
+    .select('id, email, name, company_name, created_at, verified, plan, default_grade, default_subject, stripe_customer_id, stripe_subscription_id, exports_used_this_month, exports_reset_at, question_tokens_balance, standard_year_level')
     .eq('stripe_customer_id', customerId)
     .single();
 
@@ -196,6 +197,7 @@ export async function updateUserSubscription(
   plan: SubscriptionPlan,
   stripeCustomerId?: string,
   stripeSubscriptionId?: string,
+  standardYearLevel?: 'Year 11' | 'Year 12' | null,
 ): Promise<void> {
   const resetAt = new Date();
   resetAt.setMonth(resetAt.getMonth() + 1);
@@ -208,6 +210,13 @@ export async function updateUserSubscription(
 
   if (stripeCustomerId) updates.stripe_customer_id = stripeCustomerId;
   if (stripeSubscriptionId) updates.stripe_subscription_id = stripeSubscriptionId;
+
+  // Standard users can access one year level; Pro and Free are unrestricted by this field.
+  if (plan === 'standard') {
+    updates.standard_year_level = standardYearLevel ?? null;
+  } else {
+    updates.standard_year_level = null;
+  }
 
   const { error } = await supabaseAdmin
     .from('users')

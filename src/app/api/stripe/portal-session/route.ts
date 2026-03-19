@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, getUserById } from '@/lib/auth';
 import { getStripeClient } from '@/lib/stripe';
+import { getPublicAppBaseUrl } from '@/lib/url';
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No active subscription found' }, { status: 404 });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
+    const baseUrl = getPublicAppBaseUrl(request);
     const stripe = getStripeClient();
 
     const portalSession = await stripe.billingPortal.sessions.create({

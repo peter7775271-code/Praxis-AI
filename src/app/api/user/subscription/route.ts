@@ -76,6 +76,7 @@ export async function GET(request: NextRequest) {
       companyName: user.company_name ?? null,
       defaultGrade: user.default_grade ?? null,
       defaultSubject: user.default_subject ?? null,
+      standardYearLevel: user.standard_year_level ?? null,
       stripeCancelAt,
       stripeCancelAtPeriodEnd,
     });

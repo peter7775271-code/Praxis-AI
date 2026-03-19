@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, getUserById } from '@/lib/auth';
 import { getStripeClient } from '@/lib/stripe';
+import { getPublicAppBaseUrl } from '@/lib/url';
 
 type QuestionPackage = 'questions_200' | 'questions_400' | 'questions_600' | 'questions_800' | 'questions_1000' | 'questions_1500' | 'questions_2000';
 
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
+    const baseUrl = getPublicAppBaseUrl(request);
     const stripe = getStripeClient();
     const user = await getUserById(decoded.userId);
 

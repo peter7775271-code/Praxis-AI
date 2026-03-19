@@ -4340,7 +4340,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   };
 
-  const consumeExamGenerationToken = async (): Promise<{ ok: boolean; message?: string; hasActiveSubscription?: boolean }> => {
+  const consumeExamGenerationToken = async (
+    grade: string
+  ): Promise<{ ok: boolean; message?: string; hasActiveSubscription?: boolean }> => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (!token) {
       return { ok: false, message: 'Please sign in again before generating an exam.' };
@@ -4353,6 +4355,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({ grade }),
       });
 
       const data = (await response.json().catch(() => ({}))) as {
@@ -4361,6 +4364,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         tokensLimit?: number;
         tokensResetAt?: string | null;
         hasActiveSubscription?: boolean;
+        questionTokensRemaining?: number | null;
       };
 
       if (!response.ok) {
@@ -4378,6 +4382,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       }
       if (typeof data.hasActiveSubscription === 'boolean') {
         setHasActiveSubscription(data.hasActiveSubscription);
+      }
+      if (typeof data.questionTokensRemaining === 'number') {
+        setUserQuestionTokensBalance(data.questionTokensRemaining);
       }
 
       return { ok: true, hasActiveSubscription: Boolean(data.hasActiveSubscription) };
@@ -4540,7 +4547,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         };
       }
 
-      const examGenTokenResult = await consumeExamGenerationToken();
+      const examGenTokenResult = await consumeExamGenerationToken(params.grade);
       if (!examGenTokenResult.ok) {
         return { ok: false, message: examGenTokenResult.message || 'Unable to use an exam generation token.' };
       }

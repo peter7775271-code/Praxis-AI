@@ -5,6 +5,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 type BillingPlan = 'standard' | 'pro';
+type StandardYearLevel = 'Year 11' | 'Year 12';
 
 const plans: {
   key: BillingPlan;
@@ -18,7 +19,7 @@ const plans: {
   {
     key: 'standard',
     name: 'Standard',
-    price: '$99',
+    price: '$49',
     subtitle: 'Year 11 or Year 12 - pick one',
     tags: ['Year 11 only', 'Year 12 only'],
     features: [
@@ -34,7 +35,7 @@ const plans: {
   {
     key: 'pro',
     name: 'Pro',
-    price: '$199',
+    price: '$99',
     subtitle: 'Year 11 and Year 12 - both included',
     tags: ['Year 11', 'Year 12'],
     features: [
@@ -55,6 +56,7 @@ function PricingPageContent() {
   const checkoutSessionId = searchParams.get('session_id');
   const isOnboarding = searchParams.get('onboarding') === '1';
   const [pendingPlan, setPendingPlan] = useState<BillingPlan | null>(null);
+  const [standardYearLevel, setStandardYearLevel] = useState<StandardYearLevel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
@@ -123,6 +125,11 @@ function PricingPageContent() {
   }, [checkoutStatus, checkoutSessionId]);
 
   const startCheckout = async (plan: BillingPlan) => {
+    if (plan === 'standard' && !standardYearLevel) {
+      setError('Select Year 11 or Year 12 before starting Standard checkout.');
+      return;
+    }
+
     setPendingPlan(plan);
     setError(null);
 
@@ -140,7 +147,10 @@ function PricingPageContent() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({
+          plan,
+          ...(plan === 'standard' ? { standardYearLevel } : {}),
+        }),
       });
 
       const data = (await response.json()) as { error?: string; url?: string };
@@ -268,6 +278,35 @@ function PricingPageContent() {
                 </div>
 
                 <hr className="mb-4" style={{ borderColor: '#D6DFEA' }} />
+
+                {plan.key === 'standard' && (
+                  <div className="mb-4 rounded-xl border p-3" style={{ borderColor: '#D6DFEA', backgroundColor: '#F8FAFC' }}>
+                    <p className="mb-2 text-xs font-semibold" style={{ color: '#334155' }}>Choose your included year level</p>
+                    <div className="flex gap-2">
+                      {(['Year 11', 'Year 12'] as StandardYearLevel[]).map((year) => {
+                        const selected = standardYearLevel === year;
+                        return (
+                          <button
+                            key={year}
+                            type="button"
+                            onClick={() => setStandardYearLevel(year)}
+                            className="rounded-md px-3 py-1.5 text-xs font-semibold"
+                            style={{
+                              backgroundColor: selected ? '#185FA5' : '#FFFFFF',
+                              color: selected ? '#FFFFFF' : '#334155',
+                              border: selected ? '1px solid #185FA5' : '1px solid #CBD5E1',
+                            }}
+                          >
+                            {year}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-xs" style={{ color: '#64748B' }}>
+                      You can generate from this year level on Standard. The other year level requires question tokens.
+                    </p>
+                  </div>
+                )}
 
                 <ul className="flex flex-1 flex-col gap-2">
                   {plan.features.map((feature) => (

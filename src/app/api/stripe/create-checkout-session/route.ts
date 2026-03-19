@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, getUserById } from '@/lib/auth';
 import { getStripeClient } from '@/lib/stripe';
+import { getPublicAppBaseUrl } from '@/lib/url';
 
 type PlanKey = 'standard' | 'pro';
+type StandardYearLevel = 'Year 11' | 'Year 12';
 
 const PRICE_ID_BY_PLAN: Record<PlanKey, string | undefined> = {
   standard: process.env.STRIPE_STANDARD_PRICE_ID,
@@ -25,11 +27,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = (await request.json()) as { plan?: string };
+    const body = (await request.json()) as { plan?: string; standardYearLevel?: string };
     const plan = body.plan as PlanKey | undefined;
+    const standardYearLevel = body.standardYearLevel as StandardYearLevel | undefined;
 
     if (!plan || !(plan in PRICE_ID_BY_PLAN)) {
       return NextResponse.json({ error: 'Invalid plan selected' }, { status: 400 });
+    }
+
+    if (plan === 'standard' && standardYearLevel !== 'Year 11' && standardYearLevel !== 'Year 12') {
+      return NextResponse.json(
+        { error: 'Please choose Year 11 or Year 12 for the Standard plan.' },
+        { status: 400 }
+      );
     }
 
     const priceId = PRICE_ID_BY_PLAN[plan];
@@ -42,7 +52,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin;
+    const baseUrl = getPublicAppBaseUrl(request);
     const stripe = getStripeClient();
 
     const user = await getUserById(decoded.userId);
@@ -59,6 +69,7 @@ export async function POST(request: NextRequest) {
       metadata: {
         plan,
         userId: decoded.userId,
+        ...(plan === 'standard' ? { standardYearLevel } : {}),
       },
     });
 

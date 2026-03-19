@@ -4,6 +4,7 @@ import {
   getUserById,
   resetMonthlyExportsIfDue,
   incrementExportCount,
+  consumeQuestionTokens,
   PLAN_EXPORT_LIMITS,
 } from '@/lib/auth';
 
@@ -15,6 +16,9 @@ export async function POST(request: NextRequest) {
     if (!decoded?.userId) {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
+
+    const body = (await request.json().catch(() => ({}))) as { grade?: string };
+    const requestedGrade = String(body.grade || '').trim();
 
     let user = await getUserById(decoded.userId);
     if (!user) {
@@ -44,6 +48,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let usedQuestionTokenForYearOverride = false;
+    let questionTokensRemaining: number | null = null;
+
+    if (plan === 'standard' && (requestedGrade === 'Year 11' || requestedGrade === 'Year 12')) {
+      const entitledGrade =
+        user.standard_year_level
+        ?? (user.default_grade === 'Year 11' || user.default_grade === 'Year 12' ? user.default_grade : null);
+
+      if (entitledGrade && requestedGrade !== entitledGrade) {
+        const overrideResult = await consumeQuestionTokens(user.id, 1);
+        if (!overrideResult.ok) {
+          return NextResponse.json(
+            {
+              error: `Your Standard plan allows ${entitledGrade} question generation only. Buy question tokens to generate ${requestedGrade} questions.`,
+              code: 'YEAR_LEVEL_RESTRICTED',
+              entitledGrade,
+              requestedGrade,
+              questionTokensRemaining: overrideResult.remaining,
+            },
+            { status: 403 }
+          );
+        }
+
+        usedQuestionTokenForYearOverride = true;
+        questionTokensRemaining = overrideResult.remaining;
+      }
+    }
+
     await incrementExportCount(user.id);
 
     const tokensUsed = used + 1;
@@ -54,6 +86,8 @@ export async function POST(request: NextRequest) {
       tokensRemaining: Math.max(0, limit - tokensUsed),
       tokensResetAt: user.exports_reset_at ?? null,
       hasActiveSubscription: plan !== 'free',
+      usedQuestionTokenForYearOverride,
+      questionTokensRemaining,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

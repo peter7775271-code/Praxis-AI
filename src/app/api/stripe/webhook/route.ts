@@ -79,9 +79,16 @@ export async function POST(request: NextRequest) {
         if (session.mode === 'subscription') {
           const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
           const plan = (session.metadata?.plan as SubscriptionPlan | undefined) ?? 'free';
+          const standardYearLevel = (session.metadata?.standardYearLevel as 'Year 11' | 'Year 12' | undefined) ?? null;
 
           if (plan !== 'free') {
-            await updateUserSubscription(resolvedUserId, plan, customerId ?? undefined, subscriptionId ?? undefined);
+            await updateUserSubscription(
+              resolvedUserId,
+              plan,
+              customerId ?? undefined,
+              subscriptionId ?? undefined,
+              plan === 'standard' ? standardYearLevel : null
+            );
             console.log(`[stripe/webhook] Activated ${plan} plan for user ${resolvedUserId}`);
           } else {
             console.warn(`[stripe/webhook] checkout.session.completed (subscription): plan is free, skipping`);
@@ -116,7 +123,13 @@ export async function POST(request: NextRequest) {
           const status = subscription.status;
 
           if (status === 'active' || status === 'trialing') {
-            await updateUserSubscription(user.id, plan, customerId, subscription.id);
+            await updateUserSubscription(
+              user.id,
+              plan,
+              customerId,
+              subscription.id,
+              plan === 'standard' ? (user.standard_year_level ?? null) : null
+            );
             console.log(`[stripe/webhook] Updated plan to ${plan} for user ${user.id}`);
           } else if (status === 'canceled' || status === 'unpaid' || status === 'past_due') {
             await resetUserPlanToFree(user.id);

@@ -85,6 +85,7 @@ export async function GET(request: NextRequest) {
       const subscriptionId = subscription.id;
 
       let plan = (session.metadata?.plan as SubscriptionPlan | undefined) ?? 'free';
+      const standardYearLevel = (session.metadata?.standardYearLevel as 'Year 11' | 'Year 12' | undefined) ?? null;
 
       if (plan === 'free' && subscription) {
         plan = resolvePlanFromSubscription(subscription);
@@ -99,7 +100,13 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      await updateUserSubscription(user.id, plan, customerId ?? undefined, subscriptionId ?? undefined);
+      await updateUserSubscription(
+        user.id,
+        plan,
+        customerId ?? undefined,
+        subscriptionId ?? undefined,
+        plan === 'standard' ? standardYearLevel : null
+      );
 
       return NextResponse.json({ ok: true, type: 'subscription', plan });
     }
