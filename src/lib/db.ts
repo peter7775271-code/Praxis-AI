@@ -14,7 +14,7 @@ type OrderClause = { column: string; ascending: boolean };
 
 type BasicFilter = {
   type: 'basic';
-  operator: 'eq' | 'neq' | 'in' | 'is' | 'gte';
+  operator: 'eq' | 'neq' | 'in' | 'is' | 'gte' | 'lt';
   column: string;
   value: unknown;
 };
@@ -316,6 +316,11 @@ class PostgresQueryBuilder implements PromiseLike<QueryResultPayload<any>> {
     return this;
   }
 
+  lt(column: string, value: unknown) {
+    this.filters.push({ type: 'basic', operator: 'lt', column, value });
+    return this;
+  }
+
   match(values: Record<string, unknown>) {
     Object.entries(values).forEach(([column, value]) => {
       if (value === null) {
@@ -409,6 +414,11 @@ class PostgresQueryBuilder implements PromiseLike<QueryResultPayload<any>> {
       if (filter.operator === 'gte') {
         values.push(filter.value);
         return `${column} >= $${values.length}`;
+      }
+
+      if (filter.operator === 'lt') {
+        values.push(filter.value);
+        return `${column} < $${values.length}`;
       }
 
       const arrayValue = Array.isArray(filter.value) ? filter.value : [];
