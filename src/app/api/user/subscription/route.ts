@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
       planDisplayName: PLAN_DISPLAY_NAMES[plan],
       exportsUsed: used,
       exportsLimit: limit,
-      exportsRemaining: limit === -1 ? null : Math.max(0, limit - used),
+      exportsRemaining: Math.max(0, limit - used),
       hasActiveSubscription: plan !== 'free',
       stripeCustomerId: user.stripe_customer_id ?? null,
       exportsResetAt: user.exports_reset_at ?? null,

@@ -1644,7 +1644,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
           headers: { Authorization: `Bearer ${savedToken}` },
         })
           .then((r) => r.json())
-          .then((sub: any) => {
+          .then((sub: { plan?: string; exportsUsed?: number; exportsLimit?: number; exportsResetAt?: string | null; hasActiveSubscription?: boolean; error?: string }) => {
             if (sub && !sub.error) {
               setUserPlan(sub.plan ?? 'free');
               setUserExportsUsed(sub.exportsUsed ?? 0);

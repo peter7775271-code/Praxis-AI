@@ -1216,10 +1216,14 @@ export async function POST(request: Request) {
         const limit = PLAN_EXPORT_LIMITS[plan];
         const used = user.exports_used_this_month ?? 0;
 
-        if (limit !== -1 && used >= limit) {
+        // Block if free plan (limit 0) or if the monthly limit has been reached
+        if (used >= limit) {
+          const message = limit === 0
+            ? 'PDF exports are not included in the free plan. Upgrade to Standard or Pro to export.'
+            : `Monthly export limit reached (${used}/${limit}). Upgrade your plan or wait until next month.`;
           return Response.json(
             {
-              error: `Monthly export limit reached (${used}/${limit}). Upgrade your plan or wait until next month.`,
+              error: message,
               code: 'EXPORT_QUOTA_EXCEEDED',
               exportsUsed: used,
               exportsLimit: limit,
