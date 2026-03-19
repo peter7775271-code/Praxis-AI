@@ -57,6 +57,12 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 OPENAI_API_KEY=your-openai-key
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
+
+# Stripe billing
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_STANDARD_PRICE_ID=price_...
+STRIPE_PRO_PRICE_ID=price_...
 
 # Email (for sign-up verification + password reset)
 EMAIL_USER=your-gmail@gmail.com
@@ -132,5 +138,9 @@ To verify the PWA, open Chrome DevTools → Application after running the produc
 | `SUPABASE_ANON_KEY` | Supabase → Settings → API → anon public |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → service_role secret |
 | `OPENAI_API_KEY` | platform.openai.com → API keys |
+| `NEXT_PUBLIC_BASE_URL` | Your app base URL (e.g. http://localhost:3000 locally) |
+| `STRIPE_SECRET_KEY` | Stripe Dashboard → Developers → API keys → Secret key |
+| `STRIPE_STANDARD_PRICE_ID` | Stripe Product/Price id for Standard monthly plan |
+| `STRIPE_PRO_PRICE_ID` | Stripe Product/Price id for Pro monthly plan |
 | `EMAIL_USER` | Your Gmail address |
 | `EMAIL_PASS` | Gmail App Password (requires 2FA) |

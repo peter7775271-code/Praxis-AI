@@ -541,13 +541,19 @@ export function BrowseView({
 export function ExamBuilderView({
   onInitializeExam,
   isInitializing,
+  initialSubject,
+  initialGrade,
 }: {
   onInitializeExam: (params: ExamBuilderParams) => Promise<{ ok: boolean; message?: string }>;
   isInitializing: boolean;
+  initialSubject?: string | null;
+  initialGrade?: 'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12' | null;
 }) {
   const [isSimMode, setIsSimMode] = useState(false);
-  const [subject, setSubject] = useState<string>('Mathematics Advanced');
-  const [grade, setGrade] = useState<'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12'>('Year 12');
+  const [subject, setSubject] = useState<string>(initialSubject ?? 'Mathematics Advanced');
+  const [grade, setGrade] = useState<'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12'>(
+    (initialGrade as any) ?? 'Year 12'
+  );
   const [intensity, setIntensity] = useState<number>(35);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [allQuestionsFromTopic, setAllQuestionsFromTopic] = useState(false);

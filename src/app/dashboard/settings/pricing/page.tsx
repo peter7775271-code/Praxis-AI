@@ -1,162 +1,324 @@
-import Link from 'next/link';
+'use client';
 
-const tiers = [
+import Link from 'next/link';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+
+type BillingPlan = 'standard' | 'pro';
+
+const plans: {
+  key: BillingPlan;
+  name: string;
+  price: string;
+  subtitle: string;
+  tags: string[];
+  features: string[];
+  featured: boolean;
+}[] = [
   {
-    label: 'Tier 1',
-    name: 'Starter',
-    target: 'Small centres · 1-3 tutors',
-    price: '$49',
-    period: '/month',
-    chips: ['3 tutor accounts', '20 PDF exports/mo'],
+    key: 'standard',
+    name: 'Standard',
+    price: '$99',
+    subtitle: 'Year 11 or Year 12 - pick one',
+    tags: ['Year 11 only', 'Year 12 only'],
     features: [
-      'Standard Maths & Advanced access',
-      'Filter by topic & subtopic',
-      'Multiple choice & written response',
-      'Professional LaTeX formatting',
+      'All 4 maths subjects',
+      'Filter by topic, subtopic and dot point',
+      'LaTeX questions + worked solutions',
       'Images included where needed',
-      'Full worked solutions',
-      'PDF export (mock exams & worksheets)',
+      '30 exam generation tokens / month',
+      'Unlimited PDF exports after generation',
     ],
-    dotColor: '#0F6E56',
     featured: false,
   },
   {
-    label: 'Tier 2',
-    name: 'Growth',
-    target: 'Medium centres · 4-10 tutors',
-    price: '$99',
-    period: '/month',
-    chips: ['10 tutor accounts', '60 PDF exports/mo'],
+    key: 'pro',
+    name: 'Pro',
+    price: '$199',
+    subtitle: 'Year 11 and Year 12 - both included',
+    tags: ['Year 11', 'Year 12'],
     features: [
-      'Everything in Starter, plus:',
-      'Extension 1 access',
-      'Filter by syllabus dot points',
+      'Everything in Standard',
+      'Both year levels included',
+      '100 exam generation tokens / month',
+      'Unlimited PDF exports after generation',
+      'Unlimited tutor accounts',
       'Priority support',
     ],
-    dotColor: '#185FA5',
     featured: true,
-  },
-  {
-    label: 'Tier 3',
-    name: 'Pro',
-    target: 'Large centres · 10+ tutors',
-    price: '$199',
-    period: '/month',
-    chips: ['Unlimited accounts', 'Unlimited exports'],
-    features: [
-      'Everything in Growth, plus:',
-      'Extension 2 access',
-      'Unlimited PDF exports',
-      'Unlimited tutor accounts',
-      'Dedicated account support',
-    ],
-    dotColor: '#534AB7',
-    featured: false,
   },
 ];
 
-export default function DashboardPricingPage() {
+function PricingPageContent() {
+  const searchParams = useSearchParams();
+  const checkoutStatus = searchParams.get('checkout');
+  const checkoutSessionId = searchParams.get('session_id');
+  const isOnboarding = searchParams.get('onboarding') === '1';
+  const [pendingPlan, setPendingPlan] = useState<BillingPlan | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  const successMessage = useMemo(() => {
+    if (checkoutStatus === 'success') {
+      return 'Checkout completed. Confirming your subscription...';
+    }
+
+    if (checkoutStatus === 'cancelled') {
+      return 'Checkout was cancelled. You can choose a plan whenever you are ready.';
+    }
+
+    return null;
+  }, [checkoutStatus]);
+
+  useEffect(() => {
+    if (checkoutStatus !== 'success' || !checkoutSessionId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const confirmCheckout = async () => {
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+        const response = await fetch(`/api/stripe/confirm-checkout?session_id=${encodeURIComponent(checkoutSessionId)}`, {
+          method: 'GET',
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+
+        const data = (await response.json()) as { error?: string; plan?: string; message?: string };
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          const message = data.error || data.message || 'Could not confirm your subscription yet.';
+          setError(message);
+          setSyncMessage(null);
+          return;
+        }
+
+        const planName = data.plan ? data.plan.charAt(0).toUpperCase() + data.plan.slice(1) : 'paid';
+        setSyncMessage(`Your ${planName} plan is now active.`);
+        setError(null);
+      } catch (confirmError) {
+        if (cancelled) {
+          return;
+        }
+
+        const message = confirmError instanceof Error
+          ? confirmError.message
+          : 'Could not confirm your subscription yet.';
+        setError(message);
+        setSyncMessage(null);
+      }
+    };
+
+    void confirmCheckout();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [checkoutStatus, checkoutSessionId]);
+
+  const startCheckout = async (plan: BillingPlan) => {
+    setPendingPlan(plan);
+    setError(null);
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      if (!token) {
+        setError('You need to sign in before starting checkout. Please log in again.');
+        setPendingPlan(null);
+        return;
+      }
+
+      const response = await fetch('/api/stripe/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ plan }),
+      });
+
+      const data = (await response.json()) as { error?: string; url?: string };
+
+      if (response.status === 401) {
+        throw new Error(data.error || 'Your session expired. Please sign in again.');
+      }
+
+      if (!response.ok || !data.url) {
+        throw new Error(data.error || 'Could not start checkout. Please try again.');
+      }
+
+      window.location.href = data.url;
+    } catch (checkoutError) {
+      const message = checkoutError instanceof Error
+        ? checkoutError.message
+        : 'Could not start checkout. Please try again.';
+      setError(message);
+      setPendingPlan(null);
+    }
+  };
+
   return (
-    <main className="min-h-screen px-6 py-10 md:px-10" style={{ backgroundColor: '#F3F7FC' }}>
-      <div className="mx-auto w-full max-w-6xl">
+    <main className="min-h-screen px-5 py-10 md:px-10" style={{ backgroundColor: '#F3F7FC' }}>
+      <div className="mx-auto w-full max-w-5xl">
         <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-sm" style={{ color: '#5D6B82' }}>Billing</p>
             <h1 className="text-3xl font-semibold" style={{ color: '#0F172A' }}>Choose your plan</h1>
           </div>
-          <Link
-            href="/dashboard/settings"
-            className="rounded-lg px-4 py-2 text-sm font-medium"
-            style={{
-              backgroundColor: '#FFFFFF',
-              color: '#1E293B',
-              border: '1px solid #CBD5E1',
-            }}
-          >
-            Back to settings
-          </Link>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-3">
-          {tiers.map((tier) => (
-            <section
-              key={tier.name}
-              className="flex h-full flex-col rounded-2xl p-6"
+          {isOnboarding ? (
+            <Link
+              href="/dashboard"
+              className="rounded-lg px-4 py-2 text-sm font-medium"
               style={{
                 backgroundColor: '#FFFFFF',
-                border: tier.featured ? '2px solid #185FA5' : '1px solid #D6DFEA',
-                boxShadow: tier.featured ? '0 8px 24px rgba(24, 95, 165, 0.12)' : '0 6px 18px rgba(15, 23, 42, 0.06)',
+                color: '#1E293B',
+                border: '1px solid #CBD5E1',
               }}
             >
-              {tier.featured && (
-                <span
-                  className="mb-3 inline-block w-fit rounded-md px-3 py-1 text-xs font-medium"
-                  style={{ backgroundColor: '#E5F1FF', color: '#185FA5' }}
-                >
-                  Most popular
-                </span>
-              )}
+              Continue with Free
+            </Link>
+          ) : (
+            <Link
+              href="/dashboard/settings"
+              className="rounded-lg px-4 py-2 text-sm font-medium"
+              style={{
+                backgroundColor: '#FFFFFF',
+                color: '#1E293B',
+                border: '1px solid #CBD5E1',
+              }}
+            >
+              Back to settings
+            </Link>
+          )}
+        </div>
 
-              <p className="mb-1 text-xs" style={{ color: '#64748B' }}>{tier.label}</p>
-              <h2 className="mb-1 text-2xl font-semibold" style={{ color: '#0F172A' }}>{tier.name}</h2>
-              <p className="mb-4 text-xs" style={{ color: '#64748B' }}>{tier.target}</p>
+        {isOnboarding && (
+          <div className="mb-4 rounded-xl border px-4 py-3 text-sm" style={{ backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', color: '#065F46' }}>
+            You are on the Free plan by default (3 exam creations per month, 0 question tokens). Upgrade anytime.
+          </div>
+        )}
 
-              <p className="text-4xl font-semibold" style={{ color: '#0F172A' }}>
-                {tier.price}
-                <span className="ml-1 text-base font-normal" style={{ color: '#64748B' }}>{tier.period}</span>
-              </p>
+        {successMessage && (
+          <div
+            className="mb-4 rounded-xl border px-4 py-3 text-sm"
+            style={{ backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', color: '#065F46' }}
+          >
+            {syncMessage || successMessage}
+          </div>
+        )}
 
-              <hr className="my-4" style={{ borderColor: '#D6DFEA' }} />
+        {error && (
+          <div
+            className="mb-4 rounded-xl border px-4 py-3 text-sm"
+            style={{ backgroundColor: '#FEF2F2', borderColor: '#FECACA', color: '#991B1B' }}
+          >
+            {error}
+          </div>
+        )}
 
-              <div className="mb-4 flex flex-wrap gap-2">
-                {tier.chips.map((chip) => (
-                  <span
-                    key={chip}
-                    className="rounded-md px-2 py-1 text-xs"
-                    style={{
-                      backgroundColor: '#EEF3F9',
-                      color: '#334155',
-                      border: '1px solid #D6DFEA',
-                    }}
-                  >
-                    {chip}
-                  </span>
-                ))}
-              </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {plans.map((plan) => {
+            const isPending = pendingPlan === plan.key;
 
-              <hr className="mb-4" style={{ borderColor: '#D6DFEA' }} />
-
-              <ul className="flex flex-1 flex-col gap-2">
-                {tier.features.map((feature) => (
-                  <li key={feature} className="flex items-start gap-2 text-sm" style={{ color: '#1E293B' }}>
-                    <span
-                      className="mt-1.5 inline-block h-2 w-2 rounded-full"
-                      style={{ backgroundColor: tier.dotColor }}
-                    />
-                    <span>{feature}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <button
-                type="button"
-                className="mt-6 rounded-lg px-4 py-2 text-sm font-semibold"
+            return (
+              <section
+                key={plan.key}
+                className="flex h-full flex-col rounded-2xl bg-white p-6"
                 style={{
-                  backgroundColor: tier.featured ? '#185FA5' : 'var(--clr-surface-a20)',
-                  color: tier.featured ? '#FFFFFF' : '#0F172A',
-                  border: tier.featured ? 'none' : '1px solid #C7D2E2',
+                  border: plan.featured ? '2px solid #185FA5' : '1px solid #D6DFEA',
+                  boxShadow: '0 6px 18px rgba(15, 23, 42, 0.06)',
                 }}
               >
-                {tier.featured ? 'Upgrade to Growth' : `Choose ${tier.name}`}
-              </button>
-            </section>
-          ))}
+                {plan.featured && (
+                  <span
+                    className="mb-3 inline-block w-fit rounded-md px-3 py-1 text-xs font-medium"
+                    style={{ backgroundColor: '#E5F1FF', color: '#185FA5' }}
+                  >
+                    Most popular
+                  </span>
+                )}
+
+                <p className="text-2xl font-medium" style={{ color: '#0F172A' }}>{plan.name}</p>
+                <p className="mt-2 text-4xl font-semibold" style={{ color: '#0F172A' }}>
+                  {plan.price}
+                  <span className="ml-1 text-sm font-normal" style={{ color: '#64748B' }}>/ mo</span>
+                </p>
+                <p className="mb-4 mt-1 text-xs" style={{ color: '#64748B' }}>{plan.subtitle}</p>
+
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {plan.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-md px-2 py-1 text-xs"
+                      style={{
+                        backgroundColor: '#EEF3F9',
+                        color: '#334155',
+                        border: '1px solid #D6DFEA',
+                      }}
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+
+                <hr className="mb-4" style={{ borderColor: '#D6DFEA' }} />
+
+                <ul className="flex flex-1 flex-col gap-2">
+                  {plan.features.map((feature) => (
+                    <li key={feature} className="flex items-start gap-2 text-sm" style={{ color: '#334155' }}>
+                      <span
+                        className="mt-1.5 inline-block h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: plan.featured ? '#534AB7' : '#378ADD' }}
+                      />
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                <button
+                  type="button"
+                  disabled={pendingPlan !== null}
+                  onClick={() => void startCheckout(plan.key)}
+                  className="mt-6 rounded-lg px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{
+                    backgroundColor: plan.featured ? '#185FA5' : 'var(--clr-surface-a20)',
+                    color: plan.featured ? '#FFFFFF' : '#0F172A',
+                    border: plan.featured ? 'none' : '1px solid #C7D2E2',
+                  }}
+                >
+                  {isPending ? 'Redirecting...' : `Choose ${plan.name}`}
+                </button>
+              </section>
+            );
+          })}
         </div>
 
         <p className="mt-6 text-center text-sm" style={{ color: '#5D6B82' }}>
-          All plans monthly cancel anytime questions sourced from past papers and mapped to current syllabus
+          All plans are monthly subscriptions and can be cancelled anytime.
         </p>
       </div>
     </main>
+  );
+}
+
+export default function DashboardPricingPage() {
+  return (
+    <Suspense
+      fallback={(
+        <main className="min-h-screen px-5 py-10 md:px-10" style={{ backgroundColor: '#F3F7FC' }}>
+          <div className="mx-auto w-full max-w-5xl">
+            <p className="text-sm" style={{ color: '#5D6B82' }}>Loading pricing…</p>
+          </div>
+        </main>
+      )}
+    >
+      <PricingPageContent />
+    </Suspense>
   );
 }

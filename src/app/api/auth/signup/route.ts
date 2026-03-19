@@ -6,12 +6,20 @@ import nodemailer from 'nodemailer';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password, name } = await request.json();
+    const { email, password, name, companyName, defaultGrade, defaultSubject } = await request.json();
 
     // Validation
     if (!email || !password || !name) {
       return NextResponse.json(
         { error: 'Missing required fields' },
+        { status: 400 }
+      );
+    }
+
+    // Onboarding defaults (required for the UI preset flow)
+    if (!companyName || !defaultGrade || !defaultSubject) {
+      return NextResponse.json(
+        { error: 'Missing onboarding fields' },
         { status: 400 }
       );
     }
@@ -33,7 +41,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Create user
-    const user = await createUser(email, password, name);
+    const user = await createUser(email, password, name, {
+      companyName,
+      defaultGrade,
+      defaultSubject,
+    });
     const jwtToken = createToken(user.id);
 
     // Generate verification token
@@ -60,7 +72,7 @@ export async function POST(request: NextRequest) {
         subject: 'Verify your email address',
         html: `
           <h2>Welcome ${name}!</h2>
-          <p>Please verify your email to complete your registration.</p>
+          <p>Verification is recommended, but you can still log in right away.</p>
           <a href="${verificationLink}" style="display: inline-block; padding: 10px 20px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 5px;">
             Verify Email
           </a>
@@ -74,7 +86,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        message: 'User created successfully. Please check your email to verify your account.',
+        message: 'Account created successfully.',
         user,
         token: jwtToken,
       },

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { LatexText, QuestionTextWithDividers } from '../question-text-with-dividers';
 import { parseCriteriaForDisplay, stripOuterBraces } from '../view-helpers';
+import CustomExamView from '../exam/CustomExamView';
 
 interface Props {
   [key: string]: any;
@@ -26,37 +27,27 @@ export default function SavedView({
   return (
                 <>
                   {/* Saved Attempts View */}
-                  <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
-                    <div>
-                      <h1
-                        className="text-4xl font-bold mb-2"
-                        style={{ color: 'var(--clr-primary-a50)' }}
-                      >My Saved Answers</h1>
-                      <p
-                        className="text-lg"
-                        style={{ color: 'var(--clr-surface-a40)' }}
-                      >
-                        {savedAttempts.length === 0 ? 'No saves yet' : (() => {
-                          const examCount = savedAttempts.filter(a => a.type === 'exam').length;
-                          const questionCount = savedAttempts.length - examCount;
-                          return (
-                            <>
-                              <span className="font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>{examCount}</span> exam{examCount !== 1 ? 's' : ''}
-                              {' '}&amp;{' '}
-                              <span className="font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>{questionCount}</span> question{questionCount !== 1 ? 's' : ''} saved
-                            </>
-                          );
-                        })()}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setViewMode('browse')}
-                      className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-all cursor-pointer border"
-                      style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}
+                  <div className="flex flex-col gap-2 mb-8">
+                    <h1
+                      className="text-4xl font-bold mb-2"
+                      style={{ color: 'var(--clr-primary-a50)' }}
+                    >My Saved Answers</h1>
+                    <p
+                      className="text-lg"
+                      style={{ color: 'var(--clr-surface-a40)' }}
                     >
-                      <RefreshCw className="w-4 h-4" />
-                      Browse exams
-                    </button>
+                      {savedAttempts.length === 0 ? 'No saves yet' : (() => {
+                        const examCount = savedAttempts.filter(a => a.type === 'exam').length;
+                        const questionCount = savedAttempts.length - examCount;
+                        return (
+                          <>
+                            <span className="font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>{examCount}</span> exam{examCount !== 1 ? 's' : ''}
+                            {' '}&amp;{' '}
+                            <span className="font-semibold" style={{ color: 'var(--clr-primary-a50)' }}>{questionCount}</span> question{questionCount !== 1 ? 's' : ''} saved
+                          </>
+                        );
+                      })()}
+                    </p>
                   </div>
 
                   {selectedAttempt ? (
