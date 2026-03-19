@@ -1,0 +1,106 @@
+
+> project@0.1.0 build
+> next build --webpack
+
+▲ Next.js 16.1.4 (webpack)
+- Environments: .env.local
+
+  Creating an optimized production build ...
+ ✓ (pwa) Compiling for server...
+ ✓ (pwa) Compiling for server...
+ ✓ (pwa) Compiling for client (static)...
+ ○ (pwa) Service worker: /home/peter/project/public/sw.js
+ ○ (pwa)   URL: /sw.js
+ ○ (pwa)   Scope: /
+ ○ (pwa) This app will fallback to these precached routes when fetching from the cache and the network fails:
+ ○ (pwa)   Documents (pages): /~offline
+✓ Compiled successfully in 54s
+  Running TypeScript ...
+  Collecting page data using 7 workers ...
+(node:26463) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:26484) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:26477) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:26457) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:26470) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:26491) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:26498) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✅ Database users table verified
+✅ Database users table verified
+✅ Database users table verified
+✅ Database users table verified
+✅ Database users table verified
+✅ Database users table verified
+✅ Database users table verified
+  Generating static pages using 7 workers (0/77) ...
+  Generating static pages using 7 workers (19/77) 
+  Generating static pages using 7 workers (38/77) 
+⨯ useSearchParams() should be wrapped in a suspense boundary at page "/dashboard/settings". Read more: https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout
+    at Q (/home/peter/project/.next/server/chunks/7471.js:2:2111)
+    at o (/home/peter/project/.next/server/chunks/7471.js:11:50133)
+    at aR (/home/peter/project/.next/server/chunks/7578.js:1:173113)
+    at an (/home/peter/project/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:2:84360)
+    at ai (/home/peter/project/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:2:86179)
+    at al (/home/peter/project/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:2:107953)
+    at as (/home/peter/project/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:2:105368)
+    at am (/home/peter/project/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:2:112882)
+    at au (/home/peter/project/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:2:109985)
+    at al (/home/peter/project/node_modules/next/dist/compiled/next-server/app-page.runtime.prod.js:2:108231)
+Error occurred prerendering page "/dashboard/settings". Read more: https://nextjs.org/docs/messages/prerender-error
+Export encountered an error on /dashboard/settings/page: /dashboard/settings, exiting the build.
+⨯ Next.js build worker exited with code: 1 and signal: null
