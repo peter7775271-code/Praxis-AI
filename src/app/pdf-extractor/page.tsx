@@ -1,8 +1,8 @@
 import { PdfImageExtractor } from '@/components/PdfImageExtractor';
 
 export const metadata = {
-  title: 'PDF Image Extractor',
-  description: 'Extract images from PDF files'
+  title: 'PDF to JPG Converter',
+  description: 'Convert PDF pages to JPG files and preview them'
 };
 
 export default function PdfExtractorPage() {

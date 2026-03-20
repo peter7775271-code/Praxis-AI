@@ -49,6 +49,7 @@ type CustomExamQuestion = {
 
 type DisplayExamQuestion = CustomExamQuestion & {
   display_question_number: string;
+  source_question_numbers: string[];
   grouped_subparts: Array<{
     id: string;
     label: string;
@@ -68,6 +69,18 @@ const ROMAN_TO_NUMBER: Record<string, number> = {
   viii: 8,
   ix: 9,
   x: 10,
+};
+
+const normalizeSubject = (value: string | null | undefined) => String(value || '').trim().toLowerCase();
+
+const isMathematicsAdvancedSubject = (value: string | null | undefined) => {
+  const normalized = normalizeSubject(value);
+  return normalized.includes('mathematics advanced') || normalized === 'mathematics';
+};
+
+const isMathematicsExtensionSubject = (value: string | null | undefined) => {
+  const normalized = normalizeSubject(value);
+  return normalized.includes('extension 1') || normalized.includes('ext 1') || normalized.includes('extension 2') || normalized.includes('ext 2');
 };
 
 const parseQuestionNumber = (value: string | null | undefined) => {
@@ -92,6 +105,12 @@ const getRomanGroupBase = (value: string | null | undefined) => {
   return `${parsed.number} (${parsed.letter})`;
 };
 
+const getAdvancedGroupBase = (value: string | null | undefined) => {
+  const parsed = parseQuestionNumber(value);
+  if (!Number.isFinite(parsed.number) || !parsed.letter) return null;
+  return String(parsed.number);
+};
+
 const getRomanGroupKey = (question: CustomExamQuestion) => {
   const base = getRomanGroupBase(question.question_number);
   if (!base) return null;
@@ -104,13 +123,37 @@ const getRomanGroupKey = (question: CustomExamQuestion) => {
   ].join('|');
 };
 
+const getAdvancedGroupKey = (question: CustomExamQuestion) => {
+  const base = getAdvancedGroupBase(question.question_number);
+  if (!base) return null;
+
+  return [
+    String(question.subject || '').trim(),
+    String(question.year || '').trim(),
+    String(question.school_name || DEFAULT_EXAM_SOURCE_LABEL).trim(),
+    base,
+  ].join('|');
+};
+
+const getRelatedGroupKey = (question: CustomExamQuestion) => {
+  if (isMathematicsAdvancedSubject(question.subject)) {
+    return getAdvancedGroupKey(question);
+  }
+  if (isMathematicsExtensionSubject(question.subject)) {
+    return getRomanGroupKey(question);
+  }
+  return getRomanGroupKey(question);
+};
+
 const buildGroupedQuestion = (group: CustomExamQuestion[]): DisplayExamQuestion => {
   const first = group[0];
 
   if (group.length === 1) {
+    const originalNumber = String(first.question_number || '').trim();
     return {
       ...first,
       display_question_number: String(first.question_number || '').trim() || 'Question',
+      source_question_numbers: originalNumber ? [originalNumber] : [],
       grouped_subparts: [],
     };
   }
@@ -121,19 +164,40 @@ const buildGroupedQuestion = (group: CustomExamQuestion[]): DisplayExamQuestion 
     return a.number - b.number || a.letter.localeCompare(b.letter) || a.subpart - b.subpart || a.raw.localeCompare(b.raw);
   });
 
-  const displayQuestionNumber = getRomanGroupBase(first.question_number) || String(first.question_number || '').trim() || 'Question';
-  const questionText = sortedGroup
-    .map((question) => {
-      const roman = parseQuestionNumber(question.question_number).roman;
-      const label = roman ? `(${roman})` : String(question.question_number || 'Part');
+  const parsedEntries = sortedGroup.map((question) => ({ question, parsed: parseQuestionNumber(question.question_number) }));
+  const numericParts = parsedEntries
+    .map((entry) => entry.parsed.number)
+    .filter((value) => Number.isFinite(value));
+  const allSameNumber = numericParts.length === parsedEntries.length && new Set(numericParts).size === 1;
+  const allHaveLetter = parsedEntries.every((entry) => Boolean(entry.parsed.letter));
+  const allHaveRoman = parsedEntries.every((entry) => Boolean(entry.parsed.roman));
+  const sameLetter = new Set(parsedEntries.map((entry) => entry.parsed.letter || '__')).size === 1;
+  const useRomanOnlyLabels = allSameNumber && sameLetter && allHaveRoman;
+  const useLetterOnlyLabels = allSameNumber && allHaveLetter && !useRomanOnlyLabels;
+
+  const displayQuestionNumber = useLetterOnlyLabels
+    ? String(parsedEntries[0]?.parsed.number || String(first.question_number || '').trim() || 'Question')
+    : useRomanOnlyLabels
+      ? getRomanGroupBase(first.question_number) || String(first.question_number || '').trim() || 'Question'
+      : String(first.question_number || '').trim() || 'Question';
+  const questionText = parsedEntries
+    .map(({ question, parsed }) => {
+      const label = useRomanOnlyLabels && parsed.roman
+        ? `(${parsed.roman})`
+        : useLetterOnlyLabels && parsed.letter
+          ? `(${parsed.letter})${parsed.roman ? `(${parsed.roman})` : ''}`
+          : String(question.question_number || 'Part');
       return `${formatPartDividerPlaceholder(label)}\n\n${question.question_text}`;
     })
     .join('');
-  const sampleAnswer = sortedGroup
-    .filter((question) => String(question.sample_answer || '').trim())
-    .map((question) => {
-      const roman = parseQuestionNumber(question.question_number).roman;
-      const label = roman ? `(${roman})` : String(question.question_number || 'Part');
+  const sampleAnswer = parsedEntries
+    .filter(({ question }) => String(question.sample_answer || '').trim())
+    .map(({ question, parsed }) => {
+      const label = useRomanOnlyLabels && parsed.roman
+        ? `(${parsed.roman})`
+        : useLetterOnlyLabels && parsed.letter
+          ? `(${parsed.letter})${parsed.roman ? `(${parsed.roman})` : ''}`
+          : String(question.question_number || 'Part');
       return `${formatPartDividerPlaceholder(label)}\n\n${question.sample_answer}`;
     })
     .join('');
@@ -143,16 +207,23 @@ const buildGroupedQuestion = (group: CustomExamQuestion[]): DisplayExamQuestion 
     ...first,
     question_number: displayQuestionNumber,
     display_question_number: displayQuestionNumber,
+    source_question_numbers: parsedEntries
+      .map(({ question }) => String(question.question_number || '').trim())
+      .filter((value, index, all) => Boolean(value) && all.indexOf(value) === index),
     marks: sortedGroup.reduce((sum, question) => sum + (question.marks || 0), 0),
     question_text: questionText,
     sample_answer: sampleAnswer || first.sample_answer,
     graph_image_data: graphSource?.graph_image_data || first.graph_image_data,
     graph_image_size: graphSource?.graph_image_size || first.graph_image_size,
-    grouped_subparts: sortedGroup.map((question) => {
-      const roman = parseQuestionNumber(question.question_number).roman;
+    grouped_subparts: parsedEntries.map(({ question, parsed }) => {
+      const label = useRomanOnlyLabels && parsed.roman
+        ? `(${parsed.roman})`
+        : useLetterOnlyLabels && parsed.letter
+          ? `(${parsed.letter})${parsed.roman ? `(${parsed.roman})` : ''}`
+          : String(question.question_number || 'Part');
       return {
         id: question.id,
-        label: roman ? `(${roman})` : String(question.question_number || 'Part'),
+        label,
         question_text: question.question_text,
         sample_answer: question.sample_answer,
       };
@@ -181,7 +252,7 @@ export default function CustomExamView({
 
     for (let index = 0; index < questions.length; index += 1) {
       const currentQuestion = questions[index];
-      const currentGroupKey = getRomanGroupKey(currentQuestion);
+      const currentGroupKey = getRelatedGroupKey(currentQuestion);
 
       if (!currentGroupKey) {
         grouped.push(buildGroupedQuestion([currentQuestion]));
@@ -190,7 +261,7 @@ export default function CustomExamView({
 
       const siblings = [currentQuestion];
       let nextIndex = index + 1;
-      while (nextIndex < questions.length && getRomanGroupKey(questions[nextIndex]) === currentGroupKey) {
+      while (nextIndex < questions.length && getRelatedGroupKey(questions[nextIndex]) === currentGroupKey) {
         siblings.push(questions[nextIndex]);
         nextIndex += 1;
       }
@@ -279,6 +350,9 @@ export default function CustomExamView({
             const isMcq = question.question_type === 'multiple_choice';
             const options = getMcqOptions(question);
             const displayNumber = index + 1;
+            const sourceQuestionNumber = question.source_question_numbers.length
+              ? question.source_question_numbers.join(', ')
+              : (String(question.display_question_number || '').trim() || 'Unknown');
 
             return (
               <section key={question.id} className="rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm md:p-8">
@@ -314,6 +388,10 @@ export default function CustomExamView({
                           <div>
                             <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-neutral-400">Source</p>
                             <p className="mt-1">{question.year} {question.school_name || DEFAULT_EXAM_SOURCE_LABEL}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-neutral-400">Paper Question Number</p>
+                            <p className="mt-1">{sourceQuestionNumber}</p>
                           </div>
                         </div>
                       </PopoverContent>

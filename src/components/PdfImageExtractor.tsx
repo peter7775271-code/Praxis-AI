@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, ChangeEvent, FormEvent } from 'react';
-import Image from 'next/image';
 
 interface ExtractedImage {
   filename: string;
@@ -24,7 +23,7 @@ export function PdfImageExtractor() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [extractedImages, setExtractedImages] = useState<ExtractedImage[]>([]);
-  const [maxImages, setMaxImages] = useState<string>('');
+  const [maxPages, setMaxPages] = useState<string>('');
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -55,8 +54,8 @@ export function PdfImageExtractor() {
     try {
       const formData = new FormData();
       formData.append('pdf', file);
-      if (maxImages) {
-        formData.append('maxImages', maxImages);
+      if (maxPages) {
+        formData.append('maxPages', maxPages);
       }
 
       const response = await fetch('/api/pdf/extract-images', {
@@ -74,7 +73,7 @@ export function PdfImageExtractor() {
       if (data.success && data.images.length > 0) {
         setExtractedImages(data.images);
       } else {
-        setError(data.message || 'No images were extracted from the PDF');
+        setError(data.message || 'No pages were converted from the PDF');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -103,8 +102,8 @@ export function PdfImageExtractor() {
   return (
     <div className="w-full max-w-4xl mx-auto p-6 space-y-8">
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold">📄 PDF Image Extractor</h1>
-        <p className="text-gray-600">Upload a PDF to extract all images as JPEGs</p>
+        <h1 className="text-3xl font-bold">PDF to JPG Converter (Dev Tool)</h1>
+        <p className="text-gray-600">Upload a PDF and convert each page into JPG files.</p>
       </div>
 
       {/* Upload Section */}
@@ -129,18 +128,18 @@ export function PdfImageExtractor() {
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="max-images" className="block text-sm font-medium">
-            Max Images to Extract (Optional)
+          <label htmlFor="max-pages" className="block text-sm font-medium">
+            Max Pages to Convert (Optional)
           </label>
           <input
-            id="max-images"
+            id="max-pages"
             type="number"
             min="1"
             max="1000"
-            value={maxImages}
-            onChange={(e) => setMaxImages(e.target.value)}
+            value={maxPages}
+            onChange={(e) => setMaxPages(e.target.value)}
             disabled={loading}
-            placeholder="Leave empty for all images"
+            placeholder="Leave empty to convert all pages"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm disabled:opacity-50"
           />
         </div>
@@ -150,7 +149,7 @@ export function PdfImageExtractor() {
           disabled={!file || loading}
           className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:cursor-not-allowed"
         >
-          {loading ? '⏳ Extracting Images...' : '🚀 Extract Images'}
+          {loading ? 'Converting pages...' : 'Convert PDF to JPG'}
         </button>
       </form>
 
@@ -167,13 +166,13 @@ export function PdfImageExtractor() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold">
-              ✓ Extracted {extractedImages.length} Image{extractedImages.length !== 1 ? 's' : ''}
+              Converted {extractedImages.length} JPG page{extractedImages.length !== 1 ? 's' : ''}
             </h2>
             <button
               onClick={downloadAllAsZip}
               className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
             >
-              ⬇️ Download All
+              Download All
             </button>
           </div>
 
@@ -207,7 +206,7 @@ export function PdfImageExtractor() {
                     onClick={() => downloadImage(image)}
                     className="w-full mt-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 px-2 rounded transition-colors"
                   >
-                    ⬇️ Download
+                    Download JPG
                   </button>
                 </div>
               </div>
@@ -238,8 +237,8 @@ export function PdfImageExtractor() {
       {/* Empty State */}
       {!loading && extractedImages.length === 0 && !error && (
         <div className="text-center py-12 text-gray-500">
-          <p className="text-lg mb-2">📤 Upload a PDF to get started</p>
-          <p className="text-sm">Select a PDF file and click "Extract Images" to begin</p>
+          <p className="text-lg mb-2">Upload a PDF to get started</p>
+          <p className="text-sm">Choose a PDF, click convert, then preview all JPG pages below.</p>
         </div>
       )}
     </div>

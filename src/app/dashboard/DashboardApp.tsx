@@ -567,6 +567,18 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     return normalized === 'mathematics' || normalized === 'mathematics advanced';
   };
 
+  const normalizeSubject = (value: string | null | undefined) => String(value || '').trim().toLowerCase();
+
+  const isMathematicsAdvancedSubject = (value: string | null | undefined) => {
+    const normalized = normalizeSubject(value);
+    return normalized.includes('mathematics advanced') || normalized === 'mathematics';
+  };
+
+  const isMathematicsExtensionSubject = (value: string | null | undefined) => {
+    const normalized = normalizeSubject(value);
+    return normalized.includes('extension 1') || normalized.includes('ext 1') || normalized.includes('extension 2') || normalized.includes('ext 2');
+  };
+
   const applyQuestionGroupUpdates = (updatedQuestions: Array<{ id: string; group_id?: string | null }>) => {
     const updatedById = new Map(
       updatedQuestions
@@ -738,7 +750,23 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   };
 
   const expandRomanSubpartSelection = (selected: Question[], sourcePool: Question[]) => {
+    const getAdvancedLetterGroupKey = (question: Question) => {
+      if (!isMathematicsAdvancedSubject(question.subject)) return null;
+      const parsed = parseQuestionNumberForSort(question.question_number);
+      if (!parsed.part || !Number.isFinite(parsed.number)) return null;
+      const paperNumber = String((question as any).paper_number ?? '');
+      return [
+        String(question.grade || ''),
+        String(question.subject || ''),
+        String(question.year || ''),
+        String(question.school_name || ''),
+        paperNumber,
+        String(parsed.number),
+      ].join('|');
+    };
+
     const getRomanGroupKey = (question: Question) => {
+      if (!isMathematicsExtensionSubject(question.subject)) return null;
       const parsed = parseQuestionNumberForSort(question.question_number);
       if (!parsed.part || !parsed.subpart) return null;
       const base = getQuestionDisplayBase(question.question_number);
@@ -752,6 +780,24 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         base,
       ].join('|');
     };
+
+    const advancedGroups = new Map<string, Question[]>();
+    sourcePool.forEach((question) => {
+      const groupKey = getAdvancedLetterGroupKey(question);
+      if (!groupKey) return;
+      const existing = advancedGroups.get(groupKey) || [];
+      existing.push(question);
+      advancedGroups.set(groupKey, existing);
+    });
+
+    advancedGroups.forEach((group, groupKey) => {
+      const sortedGroup = [...group].sort((a, b) => {
+        const left = parseQuestionNumberForSort(a.question_number);
+        const right = parseQuestionNumberForSort(b.question_number);
+        return left.number - right.number || left.part.localeCompare(right.part) || left.subpart - right.subpart || left.raw.localeCompare(right.raw);
+      });
+      advancedGroups.set(groupKey, sortedGroup);
+    });
 
     const romanGroups = new Map<string, Question[]>();
     sourcePool.forEach((question) => {
@@ -772,10 +818,29 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     });
 
     const seenIds = new Set<string>();
+    const seenAdvancedGroupKeys = new Set<string>();
     const seenGroupKeys = new Set<string>();
     const expanded: Question[] = [];
 
     selected.forEach((question) => {
+      const advancedGroupKey = getAdvancedLetterGroupKey(question);
+      if (advancedGroupKey) {
+        if (!seenAdvancedGroupKeys.has(advancedGroupKey)) {
+          seenAdvancedGroupKeys.add(advancedGroupKey);
+          const relatedKey = `advanced:${advancedGroupKey}`;
+          const siblings = advancedGroups.get(advancedGroupKey) || [question];
+          siblings.forEach((sibling) => {
+            if (seenIds.has(sibling.id)) return;
+            seenIds.add(sibling.id);
+            expanded.push({
+              ...sibling,
+              _display_group_key: sibling._display_group_key || relatedKey,
+            });
+          });
+        }
+        return;
+      }
+
       const groupKey = getRomanGroupKey(question);
       if (groupKey) {
         if (!seenGroupKeys.has(groupKey)) {
@@ -864,6 +929,15 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     if (explicitGroupKey) return explicitGroupKey;
     const persistedGroupKey = String(question.group_id || '').trim();
     if (persistedGroupKey) return `persisted:${persistedGroupKey}`;
+
+    const parsed = parseQuestionNumberParts(question.question_number);
+    if (isMathematicsAdvancedSubject(question.subject) && parsed.number !== null && parsed.letter) {
+      return `advanced:${parsed.number}`;
+    }
+    if (isMathematicsExtensionSubject(question.subject) && parsed.number !== null && parsed.letter && parsed.roman) {
+      return `extension:${parsed.number}:${parsed.letter}`;
+    }
+
     return getQuestionParentDisplayBase(question.question_number);
   };
 

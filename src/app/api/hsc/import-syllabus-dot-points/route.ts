@@ -24,6 +24,9 @@ type ParsedDotPoint = {
   points: string[];
 };
 
+const NO_DOT_POINT_PLACEHOLDER = '__NO_DOT_POINT__';
+const isNoDotPointPlaceholder = (value: string) => value.trim() === NO_DOT_POINT_PLACEHOLDER;
+
 const MAX_DB_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 300;
 const UPSERT_BATCH_SIZE = 100;
@@ -42,19 +45,19 @@ const parseSyllabusInput = (input: string): ParsedDotPoint[] => {
   let currentPoints: string[] = [];
 
   const flush = () => {
-    if (!currentGrade || !currentTopic || !currentSubtopic || currentPoints.length === 0) {
-      if (currentGrade && currentTopic && currentSubtopic) {
-        // subtopic with no points — skip silently
-      }
+    if (!currentGrade || !currentTopic || !currentSubtopic) {
       currentPoints = [];
       return;
     }
+
+    const normalizedPoints = Array.from(new Set(currentPoints.map((p) => p.trim()).filter(Boolean)));
 
     blocks.push({
       grade: currentGrade,
       topic: currentTopic,
       subtopic: currentSubtopic,
-      points: Array.from(new Set(currentPoints.map((p) => p.trim()).filter(Boolean))),
+      // Allow topic/subtopic-only imports by storing a hidden placeholder row.
+      points: normalizedPoints.length > 0 ? normalizedPoints : [NO_DOT_POINT_PLACEHOLDER],
     });
 
     currentPoints = [];
@@ -88,7 +91,7 @@ const parseSyllabusInput = (input: string): ParsedDotPoint[] => {
       continue;
     }
 
-    throw new Error(`Unrecognized line: "${line}". Expected GRADE, TOPIC, SUBTOPIC, or POINT_n.`);
+    throw new Error(`Unrecognized line: "${line}". Expected GRADE, TOPIC, SUBTOPIC, or optional POINT_n.`);
   }
 
   flush();
@@ -187,6 +190,7 @@ export async function POST(request: Request) {
       const topic = block.topic.trim();
       const subtopic = block.subtopic.trim();
       const points = block.points;
+      const visiblePointCount = points.filter((point) => !isNoDotPointPlaceholder(point)).length;
 
       let subjects: string[];
 
@@ -205,7 +209,7 @@ export async function POST(request: Request) {
           const errorMessage = `Failed loading subjects for ${grade} / ${topic}: ${formatErrorMessage(subjectError)}`;
           if (!firstFailureMessage) firstFailureMessage = errorMessage;
           failedBlocks += 1;
-          details.push({ grade, topic, subtopic, subjects: [], points: points.length, status: `failed:${errorMessage}` });
+          details.push({ grade, topic, subtopic, subjects: [], points: visiblePointCount, status: `failed:${errorMessage}` });
           continue;
         }
 
@@ -220,7 +224,7 @@ export async function POST(request: Request) {
 
       if (!subjects.length) {
         skippedBlocks += 1;
-        details.push({ grade, topic, subtopic, subjects: [], points: points.length, status: 'skipped:no-subject-match' });
+        details.push({ grade, topic, subtopic, subjects: [], points: visiblePointCount, status: 'skipped:no-subject-match' });
         continue;
       }
 
@@ -258,12 +262,12 @@ export async function POST(request: Request) {
       if (blockFailure) {
         if (!firstFailureMessage) firstFailureMessage = blockFailure;
         failedBlocks += 1;
-        details.push({ grade, topic, subtopic, subjects, points: points.length, status: `failed:${blockFailure}` });
+        details.push({ grade, topic, subtopic, subjects, points: visiblePointCount, status: `failed:${blockFailure}` });
         continue;
       }
 
       insertedRows += blockInsertCount;
-      details.push({ grade, topic, subtopic, subjects, points: points.length, status: 'imported' });
+      details.push({ grade, topic, subtopic, subjects, points: visiblePointCount, status: 'imported' });
     }
 
     const importedBlocks = details.filter((detail) => detail.status === 'imported').length;

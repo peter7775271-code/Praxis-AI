@@ -1,8 +1,16 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/db';
 import OpenAI from 'openai';
+import { promises as fs, constants } from 'fs';
+import path from 'path';
+import { randomUUID } from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
 export const runtime = 'nodejs';
+
+const execFileAsync = promisify(execFile);
+const PDFTOCAIRO_PATH = process.env.PDFTOCAIRO_PATH ?? '/usr/bin/pdftocairo';
 
 const MIN_PAPER_YEAR = 2017;
 const MAX_PAPER_YEAR = new Date().getFullYear();
@@ -210,95 +218,17 @@ const getTopicOptions = (grade: string, subject: string) => {
 };
 
 const buildPdfPrompt = (
-  topics: ReadonlyArray<string>,
+  _topics: ReadonlyArray<string>,
   includeMarkingCriteria: boolean,
   includeTopicIdentify: boolean
-) => `I have provided a LATEX file containing a HSC Mathematics exam paper with written-response and multiple-choice questions.
-Your task is to:
-- Convert every written-response question into clean, well-structured LaTeX code and provide a fully worked sample solution for each written-response question.
-- Convert every multiple-choice question into structured LaTeX with options, correct answer, and an explanation.
-${includeMarkingCriteria ? "- Generate a concise marking criteria for each written-response question based on the mark count." : ''}
-${includeTopicIdentify ? "- Identify the topic of each question using the topic list below." : ''}
-${includeTopicIdentify ? `\nTopic list:\n${topics.map((t) => `- ${t}`).join('\n')}` : ''}
-
-Important question splitting rule:
-- Treat each lettered subpart as its own separate question. For example, 11 (a) is one question and 11 (b) is a separate question.
-- Do NOT split deeper subparts. Parts such as 11 (a) (i), 11 (a) (ii), and 11 (a) (iii) must remain grouped together under Question 11 (a) and must not be treated as separate questions.
-- Split only by letters (a), (b), (c), not by roman numerals (i), (ii), (iii).
-
-Shared stem rule for multi-part questions (critical):
-- If a question has a shared stem/context before parts (a), (b), (c), include that shared stem only once in QUESTION_CONTENT for part (a).
-- For parts (b), (c), etc., include only the text unique to that part. Do NOT repeat the shared stem/context.
-- If a later part explicitly references the earlier stem (e.g. "Using the information above"), keep the reference text but do not duplicate the full stem.
-
-Image flag rule: If a question explicitly refers to or depends on an image/graph/diagram (e.g. "Use the diagram above"), set HAS_IMAGE to TRUE. Otherwise set HAS_IMAGE to FALSE. Do NOT output LaTeX for diagrams, crop images, or describe figures; images will be added manually later.
-
-For each NON-multiple-choice (written-response) question, you must follow this exact structure:
-
-QUESTION_NUMBER X
-NUM_MARKS X
-TOPIC X
-HAS_IMAGE {TRUE/FALSE}
-
-QUESTION_CONTENT
-{question written in LaTeX code...}
-
-SAMPLE_ANSWER
-{fully worked solution written in LaTeX code...}
-${includeMarkingCriteria ? "\nMARKING_CRITERIA\n{Use one line per mark: MARKS_1 ... MARKS_2 ... based on the total marks. Keep it concise and aligned to the question.}\n" : ''}
-
-For each MULTIPLE-CHOICE question you must follow this exact structure:
-
-QUESTION_NUMBER X
-NUM_MARKS X
-TOPIC X
-HAS_IMAGE {TRUE/FALSE}
-QUESTION_TYPE MULTIPLE_CHOICE
-
-QUESTION_CONTENT
-{question stem written in LaTeX code...}
-
-MCQ_OPTION_A {text for option A in LaTeX}
-MCQ_OPTION_B {text for option B in LaTeX}
-MCQ_OPTION_C {text for option C in LaTeX}
-MCQ_OPTION_D {text for option D in LaTeX}
-MCQ_CORRECT_ANSWER {A|B|C|D}
-MCQ_EXPLANATION {detailed LaTeX explanation: why the correct option is right, why the others are wrong; format in clear steps with blank lines between ideas so a student can follow easily}
-
-RENDER-SAFE LaTeX rules (strict):
-- Inline math must use $...$ only. Do NOT use \\( ... \\).
-- Display math must use $$...$$ only. Do NOT use \\[ ... \\].
-- Do NOT use \\begin{align} or \\begin{align*}. Use $$\\begin{aligned}...\\end{aligned}$$ instead.
-- Escape currency and percent as \\\\$ and \\\\% in plain text.
-- Never output stray or unmatched $ symbols.
-- Never insert line breaks inside words; keep sentences on one line.
-- Tables must be only \\\\begin{tabular}...\\\\end{tabular} or \\\\begin{array}...\\\\end{array}. Do not use other environments.
-- Use \\\\text{...} for words inside math.
-
-READABILITY RULES:
-Add newlines where appropriate to improve readability.
-Include one blank line between the header section and QUESTION_CONTENT.
-If a question contains internal parts such as (i) or (ii), separate them with blank lines but keep them within the same question.
-Leave one blank line between each completed question block.
-
-SAMPLE ANSWER REQUIREMENTS:
-Each solution must be fully worked out with all steps shown, clearly explained, easy to follow, and neatly formatted in LaTeX.
-
-${includeTopicIdentify ? '' : `Do NOT try to infer or assign a topic for each question. For the TOPIC field, always output exactly:
-TOPIC Unspecified
-Topics will be provided separately from a dedicated topic-mapping table.`}
-
-Output raw text only. Do not add commentary, explanations, or extra formatting. Return only the converted LaTeX content.`;
+) => buildExamImagePrompt(includeMarkingCriteria, includeTopicIdentify);
 
 const buildExamImagePrompt = (
-  topics: ReadonlyArray<string>,
   includeMarkingCriteria: boolean,
   includeTopicIdentify: boolean
-) => `You will receive HSC Mathematics exam JPEGs one at a time in multiple requests.
+) => `You will receive HSC Mathematics exam JPEGs one at a time in multiple requests If you don't see any questions in the JPG file, just ignore it and output NO TEXT. NOTHING.
 Your task is to extract every exam question (including multiple-choice and written-response questions) from the image and convert it into clean, well-structured LaTeX code with a fully worked sample solution for each question.
 ${includeMarkingCriteria ? "Generate a concise marking criteria for each written-response question based on the mark count." : ''}
-${includeTopicIdentify ? "Identify the topic of each question using the topic list below." : ''}
-${includeTopicIdentify ? `\nTopic list:\n${topics.map((t) => `- ${t}`).join('\n')}` : ''}
 
 CRITICAL — Question splitting (follow exactly):
 - Split at BOTH lettered parts and Roman numeral subparts. Each of these gets its own QUESTION_NUMBER block.
@@ -311,7 +241,7 @@ Shared stem rule for multi-part questions (critical):
 - For later subparts in the same chain (e.g. 11 (b), 11 (c), 11 (a)(ii), 11 (a)(iii)), include only the text specific to that subpart.
 - Do NOT copy-paste shared stem/context into later subparts.
 
-Image flag rule: If a question visibly includes or depends on an image/graph/diagram on the page, set HAS_IMAGE to TRUE. Do NOT crop, describe, or output LaTeX for diagrams; images will be added manually. Just set the flag.
+If it seems like a question doesn't have enough context for you to solve it. It may be the case that the question has gone over the page. Just put NOT_ENOUGH_CONTEXT as the solution. 
 
 For each NON-multiple-choice (written-response) question, you must follow this exact structure:
 
@@ -338,31 +268,15 @@ QUESTION_TYPE MULTIPLE_CHOICE
 QUESTION_CONTENT
 <question stem written in LaTeX code...>
 
-MCQ_OPTION_A <text for option A in LaTeX>
-MCQ_OPTION_B <text for option B in LaTeX>
-MCQ_OPTION_C <text for option C in LaTeX>
-MCQ_OPTION_D <text for option D in LaTeX>
+MCQ_OPTION_A <text for option A in LaTeX, dont use display math mode \[ \]>
+MCQ_OPTION_B <text for option B in LaTeX, dont use display math mode \[ \]>
+MCQ_OPTION_C <text for option C in LaTeX, dont use display math mode \[ \]>
+MCQ_OPTION_D <text for option D in LaTeX, dont use display math mode \[ \]>
 
 MCQ_EXPLANATION <detailed LaTeX explanation: why the correct option is right, why the others are wrong; format in clear steps with blank lines between ideas so a student can follow easily>
 
 MCQ_CORRECT_ANSWER {A|B|C|D}
-
-RENDER-SAFE LaTeX rules (follow so output renders correctly):
-- Inline math: use $...$ for short expressions in prose (e.g. $x = 5$, $\\frac{1}{2}$). You may also use \\( ... \\).
-- Display math (equation on its own line): use $$...$$ or \\[ ... \\]. Both are supported. Use \\[ ... \\] when you want an equation or expression to appear on a new line without extra spacing issues.
-- For multi-line aligned equations use \\[ \\begin{aligned} ... \\end{aligned} \\] or $$\\begin{aligned}...\\end{aligned}$$. Do NOT use \\begin{align} or \\begin{align*}.
-- Column vectors, matrices, or anything using \\begin{pmatrix}, \\begin{bmatrix}, \\begin{vmatrix}, \\begin{Vmatrix}, \\begin{matrix}, or \\begin{array} MUST be inside display math, NOT inline. For example, write
-\\[
-\\overrightarrow{OP} = \\begin{pmatrix} -3 \\\\ 1 \\end{pmatrix},\\quad
-\\overrightarrow{OQ} = \\begin{pmatrix} 2 \\\\ 5 \\end{pmatrix}
-\\]
-not inside a single inline $...$ block.
-- Avoid mixing long LaTeX structures (like pmatrix/array blocks) inside inline $...$ text; put them on their own line in \\[ ... \\] instead.
-- Escape currency and percent in plain text as \\$ and \\%.
-- Never output stray or unmatched $ or unmatched \\( \\) or \\[ \\].
-- Do not insert line breaks in the middle of words; keep each sentence on one line.
-- Tables: use only \\begin{tabular}...\\end{tabular} or \\begin{array}...\\end{array}.
-- Use \\text{...} for words inside math.
+  
 
 READABILITY RULES:
 Add newlines where appropriate. Include one blank line between the header section and QUESTION_CONTENT and one blank line between each completed question block.
@@ -725,6 +639,132 @@ const normalizeQuestionKey = (raw: string) => {
   return { base, part, subpart, key };
 };
 
+const romanToNumber = (roman: string | null) => {
+  if (!roman) return null;
+  const normalized = roman.toLowerCase();
+  const values: Record<string, number> = {
+    i: 1,
+    v: 5,
+    x: 10,
+  };
+  let total = 0;
+  for (let i = 0; i < normalized.length; i += 1) {
+    const current = values[normalized[i]] || 0;
+    const next = values[normalized[i + 1]] || 0;
+    if (current < next) {
+      total -= current;
+    } else {
+      total += current;
+    }
+  }
+  return total || null;
+};
+
+const letterToNumber = (letter: string | null) => {
+  if (!letter) return null;
+  const c = letter.toLowerCase().charCodeAt(0);
+  if (c < 97 || c > 122) return null;
+  return c - 96;
+};
+
+const compareQuestionNumbers = (leftRaw: string | null, rightRaw: string | null) => {
+  const left = normalizeQuestionKey(String(leftRaw || ''));
+  const right = normalizeQuestionKey(String(rightRaw || ''));
+
+  const leftBase = Number.parseInt(left.base || '', 10);
+  const rightBase = Number.parseInt(right.base || '', 10);
+  if (!Number.isNaN(leftBase) && !Number.isNaN(rightBase) && leftBase !== rightBase) {
+    return leftBase - rightBase;
+  }
+
+  const leftPart = letterToNumber(left.part);
+  const rightPart = letterToNumber(right.part);
+  if (leftPart != null && rightPart != null && leftPart !== rightPart) {
+    return leftPart - rightPart;
+  }
+  if (leftPart == null && rightPart != null) return -1;
+  if (leftPart != null && rightPart == null) return 1;
+
+  const leftSubpart = romanToNumber(left.subpart);
+  const rightSubpart = romanToNumber(right.subpart);
+  if (leftSubpart != null && rightSubpart != null && leftSubpart !== rightSubpart) {
+    return leftSubpart - rightSubpart;
+  }
+  if (leftSubpart == null && rightSubpart != null) return -1;
+  if (leftSubpart != null && rightSubpart == null) return 1;
+
+  return String(leftRaw || '').localeCompare(String(rightRaw || ''));
+};
+
+const isNotEnoughContextAnswer = (value: unknown) => {
+  const text = String(value || '').trim().toUpperCase();
+  return text === 'NOT_ENOUGH_CONTEXT';
+};
+
+const parseRecoveredAnswer = (content: string) => {
+  const lines = String(content || '').split(/\r?\n/);
+  let mode: 'answer' | 'criteria' | null = null;
+  const answerLines: string[] = [];
+  const criteriaLines: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line === 'SAMPLE_ANSWER') {
+      mode = 'answer';
+      continue;
+    }
+    if (line === 'MARKING_CRITERIA') {
+      mode = 'criteria';
+      continue;
+    }
+    if (!mode) continue;
+    if (mode === 'answer') answerLines.push(rawLine);
+    if (mode === 'criteria') criteriaLines.push(rawLine);
+  }
+
+  return {
+    sampleAnswer: answerLines.join('\n').trim(),
+    markingCriteria: criteriaLines.join('\n').trim(),
+  };
+};
+
+const buildRecoveryPrompt = (args: {
+  targetQuestionNumber: string;
+  targetQuestionText: string;
+  targetMarks: number;
+  contextBlocks: string[];
+}) => {
+  return `You are helping recover an exam sample solution that was previously marked as NOT_ENOUGH_CONTEXT.
+
+Use the related earlier subparts as context and write a high-quality replacement solution.
+
+TARGET QUESTION
+QUESTION_NUMBER ${args.targetQuestionNumber}
+NUM_MARKS ${args.targetMarks}
+
+QUESTION_CONTENT
+${args.targetQuestionText}
+
+RELATED CONTEXT (earlier subparts in same main question)
+${args.contextBlocks.join('\n\n')}
+
+Requirements:
+- Use the related context only when relevant to infer definitions, intermediate values, or setup from earlier subparts.
+- If a needed value is still missing, make the minimum explicit assumption and proceed.
+- Produce a clear, fully worked sample solution in LaTeX.
+- Also produce concise marking criteria aligned with the mark count.
+- Do not include any extra commentary outside the required output format.
+
+Output exactly in this format:
+SAMPLE_ANSWER
+<fully worked LaTeX solution>
+
+MARKING_CRITERIA
+MARKS_1 <criterion>
+MARKS_2 <criterion>
+...`;
+};
+
 const buildAutoGroupMapByQuestionId = (
   questions: Array<{ id: string; question_number: string | null }>,
   context: { schoolName: string; year: number; paperNumber: number; grade: string; subject: string }
@@ -849,6 +889,79 @@ const chunkText = (text: string, maxChars: number) => {
   return chunks.filter((chunk) => chunk.length > 0);
 };
 
+const parsePageFromFilename = (filename: string) => {
+  const match = filename.match(/(?:page-|page_)(\d+)\.jpe?g$/i);
+  if (!match) {
+    return 0;
+  }
+  return parseInt(match[1], 10) || 0;
+};
+
+type ConvertedExamImage = {
+  name: string;
+  mime: string;
+  size: number;
+  buffer: Buffer;
+};
+
+const convertPdfPagesToJpg = async (pdfBuffer: Buffer): Promise<ConvertedExamImage[]> => {
+  const tmpRoot = path.join(process.cwd(), '.tmp-pdf-images');
+  const id = randomUUID();
+  const pdfPath = path.join(tmpRoot, `${id}.pdf`);
+  const outDir = path.join(tmpRoot, `${id}-images`);
+  const outputPrefix = path.join(outDir, 'page');
+
+  await fs.mkdir(tmpRoot, { recursive: true });
+  await fs.mkdir(outDir, { recursive: true });
+  await fs.writeFile(pdfPath, pdfBuffer);
+
+  try {
+    await fs.access(PDFTOCAIRO_PATH, constants.X_OK);
+  } catch {
+    throw new Error(`pdftocairo is not executable at ${PDFTOCAIRO_PATH}`);
+  }
+
+  const maxPages = Number.parseInt(String(process.env.INGEST_PDF_MAX_PAGES || ''), 10);
+  const args = ['-jpeg', '-r', '180'];
+  if (Number.isInteger(maxPages) && maxPages > 0) {
+    args.push('-f', '1', '-l', String(maxPages));
+  }
+  args.push(pdfPath, outputPrefix);
+
+  try {
+    await execFileAsync(PDFTOCAIRO_PATH, args);
+  } catch (error) {
+    const stderr =
+      error && typeof error === 'object' && 'stderr' in error
+        ? String((error as { stderr?: unknown }).stderr ?? '')
+        : '';
+    throw new Error(stderr.trim() || 'Failed to convert exam PDF pages to JPG');
+  }
+
+  try {
+    const files = await fs.readdir(outDir);
+    const jpgFiles = files
+      .filter((name) => name.toLowerCase().endsWith('.jpg') || name.toLowerCase().endsWith('.jpeg'))
+      .sort((a, b) => parsePageFromFilename(a) - parsePageFromFilename(b));
+
+    const converted: ConvertedExamImage[] = [];
+    for (const filename of jpgFiles) {
+      const fullPath = path.join(outDir, filename);
+      const buffer = await fs.readFile(fullPath);
+      converted.push({
+        name: filename,
+        mime: 'image/jpeg',
+        size: buffer.length,
+        buffer,
+      });
+    }
+    return converted;
+  } finally {
+    await fs.rm(outDir, { recursive: true, force: true }).catch(() => {});
+    await fs.unlink(pdfPath).catch(() => {});
+  }
+};
+
 const getNextPaperNumber = async (schoolName: string, year: number) => {
   const { data, error } = await supabaseAdmin
     .from('hsc_questions')
@@ -907,6 +1020,10 @@ export async function POST(request: Request) {
     const examFile = exam instanceof File ? exam : null;
     const examImageFiles = examImages.filter((item): item is File => item instanceof File);
     const criteriaFile = criteria instanceof File ? criteria : null;
+    const examFileName = examFile?.name?.toLowerCase() || '';
+    const examIsPdf = Boolean(examFile && (examFile.type === 'application/pdf' || examFileName.endsWith('.pdf')));
+    const examIsLatex = Boolean(examFile && (examFileName.endsWith('.latex') || examFileName.endsWith('.tex')));
+    const shouldAutoConvertExamPdf = Boolean(examFile && examIsPdf && !examImageFiles.length);
 
     if (!examFile && !examImageFiles.length && !criteriaFile) {
       return NextResponse.json({ error: 'Provide exam images or a criteria PDF' }, { status: 400 });
@@ -990,9 +1107,9 @@ export async function POST(request: Request) {
     const contentParts: Array<{ source: 'exam' | 'criteria'; text: string }> = [];
     const useExamTextPipeline = String(process.env.USE_PDF_TEXT_PIPELINE || '').toLowerCase() === 'true';
 
-    if (examFile && !examImageFiles.length && !useExamTextPipeline) {
+    if (examFile && examIsLatex && !examImageFiles.length && !useExamTextPipeline) {
       return NextResponse.json(
-        { error: 'Exam images (JPEG/PNG) are required. PDF text ingestion is disabled.' },
+        { error: 'For LaTeX exam uploads, enable USE_PDF_TEXT_PIPELINE or upload exam images.' },
         { status: 400 }
       );
     }
@@ -1025,7 +1142,7 @@ export async function POST(request: Request) {
       return { text };
     };
 
-    if (examFile && !examImageFiles.length && useExamTextPipeline) {
+    if (examFile && !examImageFiles.length && useExamTextPipeline && !shouldAutoConvertExamPdf) {
       const lowerName = examFile.name.toLowerCase();
       const isLatex = lowerName.endsWith('.latex') || lowerName.endsWith('.tex');
       const examBuffer = Buffer.from(await examFile.arrayBuffer());
@@ -1039,7 +1156,7 @@ export async function POST(request: Request) {
       contentParts.push({ source: 'criteria', text: criteriaText });
     }
 
-    if (!contentParts.length && !examImageFiles.length) {
+    if (!contentParts.length && !examImageFiles.length && !shouldAutoConvertExamPdf) {
       return NextResponse.json({ error: 'No extractable text found in uploads' }, { status: 400 });
     }
 
@@ -1050,6 +1167,7 @@ export async function POST(request: Request) {
       messages: any[];
       temperature?: number;
       maxTokens?: number;
+      reasoningEffort?: 'low' | 'medium' | 'high';
     }) => {
       return await openai.chat.completions.create({
         model: args.model,
@@ -1057,6 +1175,7 @@ export async function POST(request: Request) {
         // plain-text and multimodal (image_url) payloads without over-constraining
         // the type definition.
         messages: args.messages as any,
+        reasoning_effort: args.reasoningEffort ?? 'high',
         // Omit temperature: this model only supports the default (1); sending 0 or 0.7 returns 400.
         max_completion_tokens: typeof args.maxTokens === 'number' ? args.maxTokens : 2000,
       });
@@ -1238,21 +1357,58 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
         }
       }
 
-      // If JPEGs are provided, process each image independently and attach its image data
-      // to every question parsed from that image.
-      if (examImageFiles.length) {
-        for (let index = 0; index < examImageFiles.length; index += 1) {
-          const imageFile = examImageFiles[index];
-          const imageBuffer = Buffer.from(await imageFile.arrayBuffer());
-          const imageBase64 = imageBuffer.toString('base64');
-          const imageMime = imageFile.type || 'image/jpeg';
-          const imageUrl = `data:${imageMime};base64,${imageBase64}`;
+      // Process exam images one-by-one (uploaded images and/or auto-converted PDF pages).
+      type IngestImage = {
+        name: string;
+        mime: string;
+        size: number;
+        toBuffer: () => Promise<Buffer>;
+      };
 
-          const imagePrompt = buildExamImagePrompt(topicOptions, generateMarkingCriteria, allowTopicIdentify);
+      const ingestImages: IngestImage[] = examImageFiles.map((imageFile, idx) => ({
+        name: imageFile.name || `exam-image-${idx + 1}.jpg`,
+        mime: imageFile.type || 'image/jpeg',
+        size: imageFile.size,
+        toBuffer: async () => Buffer.from(await imageFile.arrayBuffer()),
+      }));
+
+      if (shouldAutoConvertExamPdf && examFile) {
+        const examPdfBuffer = Buffer.from(await examFile.arrayBuffer());
+        const convertedPages = await convertPdfPagesToJpg(examPdfBuffer);
+        if (!convertedPages.length) {
+          return NextResponse.json(
+            { error: 'Could not convert the uploaded exam PDF into JPG pages.' },
+            { status: 400 }
+          );
+        }
+
+        convertedPages.forEach((page) => {
+          ingestImages.push({
+            name: page.name,
+            mime: page.mime,
+            size: page.size,
+            toBuffer: async () => page.buffer,
+          });
+        });
+      }
+
+      if (ingestImages.length) {
+        // Calculate which images are in the last third
+        const lastThirdStart = Math.ceil(ingestImages.length * (2 / 3));
+        for (let index = 0; index < ingestImages.length; index += 1) {
+          const ingestImage = ingestImages[index];
+          const imageBuffer = await ingestImage.toBuffer();
+          const imageBase64 = imageBuffer.toString('base64');
+          const imageMime = ingestImage.mime || 'image/jpeg';
+          const imageUrl = `data:${imageMime};base64,${imageBase64}`;
+          // Use high reasoning for last third, medium for the rest
+          const reasoningEffort = index >= lastThirdStart ? ('high' as const) : ('medium' as const);
+
+          const imagePrompt = buildExamImagePrompt(generateMarkingCriteria, allowTopicIdentify);
           rawInputs.push({
             source: 'image',
             index: index + 1,
-            input: `${imagePrompt}\n\n[image: ${imageFile.name || 'image'} (${imageMime}, ${imageFile.size} bytes)]`,
+            input: `${imagePrompt}\n\n[image: ${ingestImage.name || 'image'} (${imageMime}, ${ingestImage.size} bytes)]`,
           });
           const messages = [
             {
@@ -1279,6 +1435,7 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
             model: examVisionModel,
             messages,
             maxTokens: 10000,
+            reasoningEffort,
           });
 
           let chunkContent = extractMessageContent(response.choices?.[0]?.message?.content ?? '');
@@ -1289,6 +1446,7 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
               model: examVisionModel,
               messages,
               maxTokens: 10000,
+              reasoningEffort,
             });
             chunkContent = extractMessageContent(retryResponse.choices?.[0]?.message?.content ?? '');
           }
@@ -1302,7 +1460,7 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
             rawInputs.push({
               source: 'image-ocr',
               index: index + 1,
-              input: `${fallbackPrompt}\n\n[image: ${imageFile.name || 'image'} (${imageMime}, ${imageFile.size} bytes)]`,
+              input: `${fallbackPrompt}\n\n[image: ${ingestImage.name || 'image'} (${imageMime}, ${ingestImage.size} bytes)]`,
             });
             const fallbackMessages = [
               {
@@ -1329,13 +1487,14 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
               model: examVisionModel,
               messages: fallbackMessages,
               maxTokens: 10000,
+              reasoningEffort,
             });
             const fallbackContent = extractMessageContent(fallbackResponse.choices?.[0]?.message?.content ?? '');
 
             // If OCR extracted some text, try once more to convert THAT text into the strict
             // QUESTION_NUMBER / NUM_MARKS / SAMPLE_ANSWER schema using the text model.
             if (fallbackContent.trim() && !isRefusal(fallbackContent) && fallbackContent.trim() !== 'NO_TEXT_FOUND') {
-              const structuredPrompt = `${buildExamImagePrompt(topicOptions, generateMarkingCriteria, allowTopicIdentify)}\n\nOCR_EXTRACT:\n\n${fallbackContent}`;
+              const structuredPrompt = `${buildExamImagePrompt(generateMarkingCriteria, allowTopicIdentify)}\n\nOCR_EXTRACT:\n\n${fallbackContent}`;
               rawInputs.push({
                 source: 'image-ocr-convert',
                 index: index + 1,
@@ -1357,6 +1516,7 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
                 model: examTextModel,
                 messages: textModelMessages,
                 maxTokens: 10000,
+                reasoningEffort,
               });
               const structured = extractMessageContent(structuredResponse.choices?.[0]?.message?.content ?? '');
               if (structured.trim() && !isRefusal(structured)) {
@@ -1367,7 +1527,7 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
             }
           }
 
-          const imageLabel = `--- Image ${index + 1} of ${examImageFiles.length} ---`;
+          const imageLabel = `--- Image ${index + 1} of ${ingestImages.length} (${ingestImage.name}) ---`;
           if (chunkContent.trim() && !isRefusal(chunkContent)) {
             imageResponseBodies.push(`${imageLabel}\n\n${chunkContent}`);
           } else {
@@ -1674,6 +1834,147 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
       }
     }
 
+    let recoveredNotEnoughContextCount = 0;
+    let failedNotEnoughContextRecoveries = 0;
+    let notEnoughContextCandidates = 0;
+
+    const { data: paperQuestionsForRecovery, error: recoveryFetchError } = await supabaseAdmin
+      .from('hsc_questions')
+      .select('id, question_number, question_text, sample_answer, marking_criteria, marks, question_type')
+      .match({
+        grade,
+        year,
+        subject,
+        school_name: schoolNameForDb,
+        paper_number: paperNumber,
+      });
+
+    if (recoveryFetchError) {
+      console.error('Recovery fetch error:', recoveryFetchError);
+    } else {
+      const allWritten = (paperQuestionsForRecovery || [])
+        .filter((row: any) => String(row?.question_type || 'written') !== 'multiple_choice')
+        .sort((a: any, b: any) => compareQuestionNumbers(a.question_number || null, b.question_number || null));
+
+      const targets = allWritten.filter((row: any) => isNotEnoughContextAnswer(row?.sample_answer));
+      notEnoughContextCandidates = targets.length;
+
+      for (const target of targets) {
+        const targetNumber = String(target.question_number || '').trim();
+        const targetQuestionText = String(target.question_text || '').trim();
+        const parsedTarget = normalizeQuestionKey(targetNumber);
+        if (!targetNumber || !targetQuestionText || !parsedTarget.base) {
+          failedNotEnoughContextRecoveries += 1;
+          continue;
+        }
+
+        const targetPartRank = letterToNumber(parsedTarget.part);
+        const targetSubpartRank = romanToNumber(parsedTarget.subpart);
+        const contextRows = allWritten.filter((candidate: any) => {
+          const candidateNumber = String(candidate.question_number || '').trim();
+          const parsedCandidate = normalizeQuestionKey(candidateNumber);
+          if (!parsedCandidate.base || parsedCandidate.base !== parsedTarget.base) return false;
+          if (String(candidate.id) === String(target.id)) return false;
+          if (!candidate.question_text || !candidate.sample_answer) return false;
+          if (isNotEnoughContextAnswer(candidate.sample_answer)) return false;
+
+          const candidatePartRank = letterToNumber(parsedCandidate.part);
+          const candidateSubpartRank = romanToNumber(parsedCandidate.subpart);
+
+          if (targetPartRank == null) return false;
+          if (candidatePartRank == null) return false;
+
+          if (candidatePartRank < targetPartRank) return true;
+
+          if (candidatePartRank === targetPartRank) {
+            if (targetSubpartRank == null) return false;
+            if (candidateSubpartRank == null) return false;
+            return candidateSubpartRank < targetSubpartRank;
+          }
+
+          return false;
+        });
+
+        if (!contextRows.length) {
+          failedNotEnoughContextRecoveries += 1;
+          continue;
+        }
+
+        const contextBlocks = contextRows
+          .sort((a: any, b: any) => compareQuestionNumbers(a.question_number || null, b.question_number || null))
+          .map((row: any) => {
+            return [
+              `QUESTION_NUMBER ${row.question_number || ''}`,
+              `QUESTION_CONTENT`,
+              String(row.question_text || '').trim(),
+              `SAMPLE_ANSWER`,
+              String(row.sample_answer || '').trim(),
+            ].join('\n');
+          });
+
+        const recoveryPrompt = buildRecoveryPrompt({
+          targetQuestionNumber: targetNumber,
+          targetQuestionText,
+          targetMarks: Number(target.marks) || 0,
+          contextBlocks,
+        });
+
+        try {
+          const recoveryResponse = await createChatCompletion({
+            model: ingestModel,
+            messages: [
+              {
+                role: 'system' as const,
+                content:
+                  'You are repairing incomplete exam solutions. Return only the requested sections and keep responses concise but complete.',
+              },
+              {
+                role: 'user' as const,
+                content: recoveryPrompt,
+              },
+            ],
+            maxTokens: 4000,
+          });
+
+          const recoveryContent = extractMessageContent(recoveryResponse.choices?.[0]?.message?.content ?? '');
+          if (!recoveryContent.trim() || isRefusal(recoveryContent)) {
+            failedNotEnoughContextRecoveries += 1;
+            continue;
+          }
+
+          const parsedRecovery = parseRecoveredAnswer(recoveryContent);
+          if (!parsedRecovery.sampleAnswer || isNotEnoughContextAnswer(parsedRecovery.sampleAnswer)) {
+            failedNotEnoughContextRecoveries += 1;
+            continue;
+          }
+
+          const updatePayload: Record<string, unknown> = {
+            sample_answer: parsedRecovery.sampleAnswer,
+          };
+
+          if (parsedRecovery.markingCriteria) {
+            updatePayload.marking_criteria = parsedRecovery.markingCriteria;
+          }
+
+          const { error: recoveryUpdateError } = await supabaseAdmin
+            .from('hsc_questions')
+            .update(updatePayload)
+            .eq('id', target.id);
+
+          if (recoveryUpdateError) {
+            console.error('Recovery update error:', recoveryUpdateError);
+            failedNotEnoughContextRecoveries += 1;
+            continue;
+          }
+
+          recoveredNotEnoughContextCount += 1;
+        } catch (recoveryError) {
+          console.error('Recovery generation error:', recoveryError);
+          failedNotEnoughContextRecoveries += 1;
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: `Created ${createdQuestions.length} questions. Updated ${updatedCriteriaCount} marking criteria.`,
@@ -1700,6 +2001,11 @@ If the extracted text contains OCR noise, do your best to reconstruct the intend
       autoGroupsByQuestionId,
       updatedQuestions,
       unspecifiedClassification,
+      notEnoughContextRecovery: {
+        candidates: notEnoughContextCandidates,
+        recovered: recoveredNotEnoughContextCount,
+        failed: failedNotEnoughContextRecoveries,
+      },
       chatgpt: combinedModelOutput,
       modelOutput: combinedModelOutput,
       rawInputs,

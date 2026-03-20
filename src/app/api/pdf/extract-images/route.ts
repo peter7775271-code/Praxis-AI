@@ -3,69 +3,78 @@ import sharp from 'sharp';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { spawn } from 'child_process';
+import { execFile } from 'child_process';
+import { constants } from 'fs';
+import { promisify } from 'util';
 
 export const runtime = 'nodejs';
 
+const execFileAsync = promisify(execFile);
+const PDFTOCAIRO_PATH = process.env.PDFTOCAIRO_PATH ?? '/usr/bin/pdftocairo';
+
 type ExtractionResult = {
   pageNumber: number;
-  imageIndex: number;
   width: number;
   height: number;
   filename: string;
   base64: string;
 };
 
-async function runExtractScript(tempPdfPath: string, outputDir: string): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('node', ['scripts/extract-pdf-images.js', tempPdfPath, outputDir], {
-      cwd: process.cwd(),
-      stdio: 'inherit',
-    });
-
-    child.on('error', (err) => reject(err));
-    child.on('exit', (code) => {
-      if (code === 0) {
-        resolve([]);
-      } else {
-        reject(new Error(`extract-pdf-images.js exited with code ${code}`));
-      }
-    });
-  });
+function parsePageFromFilename(filename: string): number {
+  const match = filename.match(/(?:page-|page_)(\d+)\.jpe?g$/i);
+  if (!match) {
+    return 0;
+  }
+  return parseInt(match[1], 10) || 0;
 }
 
-async function extractImagesWithScript(buffer: Buffer, maxImages?: number): Promise<ExtractionResult[]> {
+async function convertPdfPagesToJpg(buffer: Buffer, maxPages?: number): Promise<ExtractionResult[]> {
   const tmpRoot = path.join(process.cwd(), '.tmp-pdf-images');
   const id = randomUUID();
   const pdfPath = path.join(tmpRoot, `${id}.pdf`);
   const outDir = path.join(tmpRoot, `${id}-images`);
+  const outputPrefix = path.join(outDir, 'page');
 
-  await fs.mkdir(outDir, { recursive: true });
   await fs.mkdir(tmpRoot, { recursive: true });
+  await fs.mkdir(outDir, { recursive: true });
   await fs.writeFile(pdfPath, buffer);
 
-  await runExtractScript(pdfPath, outDir);
+  try {
+    await fs.access(PDFTOCAIRO_PATH, constants.X_OK);
+  } catch {
+    throw new Error(`pdftocairo is not executable at ${PDFTOCAIRO_PATH}`);
+  }
+
+  const args = ['-jpeg', '-r', '180'];
+  if (typeof maxPages === 'number' && maxPages > 0) {
+    args.push('-f', '1', '-l', String(maxPages));
+  }
+  args.push(pdfPath, outputPrefix);
+
+  try {
+    await execFileAsync(PDFTOCAIRO_PATH, args);
+  } catch (err) {
+    const stderr = err && typeof err === 'object' && 'stderr' in err ? String((err as { stderr?: unknown }).stderr ?? '') : '';
+    const message = stderr.trim() || 'Failed to convert PDF pages to JPG';
+    throw new Error(message);
+  }
 
   const files = await fs.readdir(outDir);
-  const imageFiles = files.filter((f) => f.toLowerCase().endsWith('.jpeg') || f.toLowerCase().endsWith('.jpg'));
+  const imageFiles = files
+    .filter((f) => f.toLowerCase().endsWith('.jpeg') || f.toLowerCase().endsWith('.jpg'))
+    .sort((a, b) => parsePageFromFilename(a) - parsePageFromFilename(b));
 
-  const limitedFiles = typeof maxImages === 'number' ? imageFiles.slice(0, maxImages) : imageFiles;
+  const limitedFiles = typeof maxPages === 'number' ? imageFiles.slice(0, maxPages) : imageFiles;
 
   const results: ExtractionResult[] = [];
 
-  for (let index = 0; index < limitedFiles.length; index += 1) {
-    const filename = limitedFiles[index];
+  for (const filename of limitedFiles) {
     const fullPath = path.join(outDir, filename);
     const data = await fs.readFile(fullPath);
     const meta = await sharp(data).metadata();
 
-    const match = filename.match(/page_(\d+)_img_(\d+)/);
-    const pageNumber = match ? parseInt(match[1], 10) : 0;
-    const imageIndex = match ? parseInt(match[2], 10) - 1 : index;
-
     results.push({
-      pageNumber,
-      imageIndex,
+      pageNumber: parsePageFromFilename(filename),
       width: meta.width || 0,
       height: meta.height || 0,
       filename,
@@ -73,8 +82,8 @@ async function extractImagesWithScript(buffer: Buffer, maxImages?: number): Prom
     });
   }
 
-  // Best-effort cleanup; ignore errors
   try {
+    await fs.rm(outDir, { recursive: true, force: true });
     await fs.unlink(pdfPath).catch(() => {});
   } catch {}
 
@@ -94,7 +103,7 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData();
     const pdfFile = formData.get('pdf') as File | null;
-    const maxImagesParam = formData.get('maxImages') as string | null;
+    const maxPagesParam = formData.get('maxPages') as string | null;
 
     if (!pdfFile) {
       return NextResponse.json(
@@ -110,20 +119,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const maxImages = maxImagesParam ? parseInt(maxImagesParam, 10) : undefined;
+    const maxPages = maxPagesParam ? parseInt(maxPagesParam, 10) : undefined;
 
-    // Read PDF into buffer
     const arrayBuffer = await pdfFile.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Extract images
-    const images = await extractImagesWithScript(buffer, maxImages);
+    const images = await convertPdfPagesToJpg(buffer, maxPages);
 
     if (images.length === 0) {
       return NextResponse.json(
         {
           success: true,
-          message: 'No extractable images found in PDF',
+          message: 'No pages were converted from the PDF',
           images: [],
           count: 0
         },
@@ -134,7 +141,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        message: `Extracted ${images.length} image(s) from PDF`,
+        message: `Converted ${images.length} PDF page(s) to JPG`,
         images: images.map(img => ({
           filename: img.filename,
           pageNumber: img.pageNumber,
@@ -169,17 +176,17 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   return NextResponse.json(
     {
-      message: 'PDF Image Extraction API',
+      message: 'PDF to JPG Conversion API',
       usage: {
         method: 'POST',
         endpoint: '/api/pdf/extract-images',
         contentType: 'multipart/form-data',
         parameters: {
-          pdf: 'Required. PDF file to extract images from',
-          maxImages: 'Optional. Maximum number of images to extract (default: all)'
+          pdf: 'Required. PDF file to convert',
+          maxPages: 'Optional. Maximum number of pages to convert (default: all)'
         },
         example: {
-          curl: 'curl -X POST -F "pdf=@exam.pdf" -F "maxImages=10" http://localhost:3000/api/pdf/extract-images'
+          curl: 'curl -X POST -F "pdf=@exam.pdf" -F "maxPages=10" http://localhost:3000/api/pdf/extract-images'
         }
       }
     },

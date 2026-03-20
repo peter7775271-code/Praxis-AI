@@ -1650,7 +1650,7 @@ await fetch('/api/dev/set-plan', {
                         >
                         <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--clr-primary-a50)' }}>Syllabus Import</h2>
                         <p className="text-sm mb-4" style={{ color: 'var(--clr-surface-a40)' }}>
-                          Paste syllabus dot points to populate the taxonomy database. Use the format below.
+                          Paste syllabus topics/subtopics (dot points optional) to populate the taxonomy database. Use the format below.
                         </p>
 
                         <div className="space-y-4">
@@ -1700,7 +1700,7 @@ await fetch('/api/dev/set-plan', {
                               onChange={(e) => setSyllabusImportText(e.target.value)}
                               disabled={syllabusImporting}
                               rows={16}
-                              placeholder={`TOPIC Financial mathematics A\n\nSUBTOPIC Solve problems involving earning money\nPOINT_1 Solve problems involving wages given an hourly rate…\nPOINT_2 Calculate earnings from non-wage sources…\n\nSUBTOPIC Solve problems involving simple interest\nPOINT_1 Establish and use the formula $I = Prn$…`}
+                              placeholder={`TOPIC Further graph transformations and modelling\nSUBTOPIC Transformations of trigonometric functions\nSUBTOPIC Modelling with functions\n\nTOPIC Financial mathematics A\nSUBTOPIC Solve problems involving earning money\nPOINT_1 Solve problems involving wages given an hourly rate…\nPOINT_2 Calculate earnings from non-wage sources…`}
                               className="mt-2 w-full px-4 py-3 rounded-lg border font-mono text-sm leading-relaxed"
                               style={{
                                 backgroundColor: 'var(--clr-surface-a0)',
@@ -1717,6 +1717,15 @@ await fetch('/api/dev/set-plan', {
                               {`TOPIC <topic name>
 
 SUBTOPIC <subtopic name>
+SUBTOPIC <another subtopic>
+
+OPTIONAL:
+POINT_1 <dot point text, may include LaTeX>
+POINT_2 <dot point text>
+
+or with explicit points:
+
+SUBTOPIC <subtopic name>
 POINT_1 <dot point text, may include LaTeX>
 POINT_2 <dot point text>
 ...
@@ -1726,7 +1735,7 @@ POINT_1 ...`}
                             </pre>
                             <p className="mt-2">
                               The <strong>GRADE</strong> line is optional — if omitted, the grade selected above is used automatically.
-                              You can include multiple TOPIC blocks. Each TOPIC can have multiple SUBTOPICs.
+                              You can include multiple TOPIC blocks. Each TOPIC can have multiple SUBTOPICs. <strong>POINT_n lines are optional.</strong>
                             </p>
                           </details>
 

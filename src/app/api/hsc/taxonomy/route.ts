@@ -3,6 +3,8 @@ import { supabaseAdmin } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
+const NO_DOT_POINT_PLACEHOLDER = '__NO_DOT_POINT__';
+
 /**
  * GET /api/hsc/taxonomy?grade=Year+12&subject=Mathematics+Advanced
  *
@@ -55,9 +57,10 @@ export async function GET(request: Request) {
             const subtopic = String(row.subtopic || '').trim();
             const dotPoint = String(row.dot_point_text || '').trim();
             const id = String(row.id || '');
-            if (!topic || !subtopic || !dotPoint || !id) continue;
+            if (!topic || !subtopic || !id) continue;
             if (!grouped[topic]) grouped[topic] = {};
             if (!grouped[topic][subtopic]) grouped[topic][subtopic] = [];
+            if (!dotPoint || dotPoint === NO_DOT_POINT_PLACEHOLDER) continue;
             if (!grouped[topic][subtopic].some((d) => d.id === id)) {
                 grouped[topic][subtopic].push({ id, text: dotPoint });
             }

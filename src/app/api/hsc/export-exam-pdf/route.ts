@@ -68,6 +68,10 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
     // Recover commands that were escaped as \{}command in degraded output paths.
     .replace(/\\\{\}\s*([A-Za-z]+)/g, '\\$1')
     .replace(/\\\{\}\s*([!,:;])/g, '\\$1')
+    // Repair malformed \left/\right tokens missing required delimiters.
+    // Example: "\\left ..." or "\\right" before "\\]" -> use an invisible delimiter.
+    .replace(/\\left(?=\s*(?:\\[\[\](){}]|\\begin\{|$))/g, '\\left.')
+    .replace(/\\right(?=\s*(?:\\[\[\](){}]|\\end\{|$))/g, '\\right.')
     .replace(/\\dfrac/g, '\\frac')
     // Repair fused command pairs from OCR/model output, e.g. \pidisplaystyle -> \pi\displaystyle.
     .replace(/\\(pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega)(displaystyle|textstyle)\b/g, '\\$1\\$2')
@@ -133,6 +137,38 @@ const repairMatrixRowSeparators = (value: string) =>
     }
   );
 
+/** In array/tabular-like environments, repair single-backslash row endings before rules/line breaks. */
+const repairTableRowSeparators = (value: string) =>
+  value.replace(
+    /\\begin\{(array|tabular\*?|tabularx|longtable)\}(\[[^\]]*\])?(\{[^}]*\})?([\s\S]*?)\\end\{\1\}/g,
+    (_match, env: string, optArg: string, colSpec: string, body: string) => {
+      const repaired = String(body || '')
+        // A lone backslash before \hline/\cline/\end is almost always a broken row separator.
+        .replace(/(?<!\\)\\(?=\s*\\(?:hline|cline|end\{))/g, '\\\\')
+        // Also repair lone row-ending backslashes before a newline when the row contains table alignment.
+        .replace(/(^|[^\\])\\(?=\s*\n)/gm, (rowMatch) => {
+          return `${rowMatch.slice(0, -1)}\\\\`;
+        });
+      const optional = optArg || '';
+      const columns = colSpec || '';
+      return `\\begin{${env}}${optional}${columns}${repaired}\\end{${env}}`;
+    }
+  );
+
+/** Inside cases-like environments, repair lone row-ending backslashes to \\ separators. */
+const repairCasesRowSeparators = (value: string) =>
+  value.replace(
+    /\\begin\{(cases|dcases|rcases|drcases)\}([\s\S]*?)\\end\{\1\}/g,
+    (_match, env: string, body: string) => {
+      const repaired = String(body || '')
+        // Common OCR/model breakage: a single trailing backslash before newline.
+        .replace(/(^|[^\\])\\(?=\s*\n)/gm, (rowMatch) => `${rowMatch.slice(0, -1)}\\\\`)
+        // Also repair single row-ending backslashes before a following aligned entry (contains &).
+        .replace(/(^|[^\\])\\(?=\s*[^\n]*&)/gm, (rowMatch) => `${rowMatch.slice(0, -1)}\\\\`);
+      return `\\begin{${env}}${repaired}\\end{${env}}`;
+    }
+  );
+
 const wrapParenthesizedMathLikeSegments = (value: string) =>
   value.replace(/(^|[\s,:;])\(([^()\n]*\\(?:d?frac|sqrt)[^()\n]*)\)/g, (_match, prefix, expr) => {
     const candidate = String(expr || '').trim();
@@ -163,51 +199,174 @@ const sanitizeMisplacedTableRules = (value: string) => {
   });
 };
 
+const countUnescapedAmpersands = (line: string) => {
+  let count = 0;
+  for (let index = 0; index < line.length; index += 1) {
+    if (line[index] !== '&') continue;
+    if (index > 0 && line[index - 1] === '\\') continue;
+    count += 1;
+  }
+  return count;
+};
+
+const convertPlainAmpersandTables = (value: string) => {
+  const lines = String(value || '').split(/\r?\n/);
+  const converted: string[] = [];
+  let index = 0;
+  const guardedEnvironments = new Set([
+    'array', 'tabular', 'tabular*', 'tabularx', 'longtable',
+    'align', 'align*', 'aligned', 'alignedat', 'alignedat*',
+    'matrix', 'pmatrix', 'bmatrix', 'Bmatrix', 'vmatrix', 'Vmatrix', 'smallmatrix',
+    'cases', 'split',
+  ]);
+  let guardedDepth = 0;
+
+  const updateGuardedDepth = (line: string) => {
+    const normalizedLine = String(line || '');
+    const tokenRegex = /\\begin\{([^}]+)\}|\\end\{([^}]+)\}/g;
+    let match: RegExpExecArray | null;
+    while ((match = tokenRegex.exec(normalizedLine))) {
+      const beginEnv = String(match[1] || '').trim();
+      const endEnv = String(match[2] || '').trim();
+      if (beginEnv && guardedEnvironments.has(beginEnv)) {
+        guardedDepth += 1;
+        continue;
+      }
+      if (endEnv && guardedEnvironments.has(endEnv)) {
+        guardedDepth = Math.max(0, guardedDepth - 1);
+      }
+    }
+  };
+
+  const isPlainTableRow = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    if (trimmed.startsWith('\\')) return false;
+    if (/\b(begin|end)\{/.test(trimmed)) return false;
+    const ampCount = countUnescapedAmpersands(trimmed);
+    return ampCount >= 1;
+  };
+
+  while (index < lines.length) {
+    const currentLine = lines[index];
+    if (guardedDepth > 0 || !isPlainTableRow(currentLine)) {
+      converted.push(currentLine);
+      updateGuardedDepth(currentLine);
+      index += 1;
+      continue;
+    }
+
+    const blockStart = index;
+    while (index < lines.length && isPlainTableRow(lines[index])) {
+      index += 1;
+    }
+
+    const block = lines.slice(blockStart, index);
+    const colCounts = block.map((line) => countUnescapedAmpersands(line) + 1);
+    const firstCols = colCounts[0] || 0;
+    const allSameCols = firstCols >= 2 && colCounts.every((cols) => cols === firstCols);
+
+    if (block.length >= 2 && allSameCols) {
+      const colSpec = `|${Array.from({ length: firstCols }).map(() => 'c').join('|')}|`;
+      converted.push(`\\begin{tabular}{${colSpec}}`);
+      converted.push('\\hline');
+      block.forEach((row, rowIndex) => {
+        const cleanedRow = row.trim().replace(/([A-Za-z])\\([A-Za-z])/g, '$1/$2');
+        converted.push(`${cleanedRow} \\\\`);
+        if (rowIndex === 0) converted.push('\\hline');
+      });
+      converted.push('\\hline');
+      converted.push('\\end{tabular}');
+      continue;
+    }
+
+    converted.push(...block);
+  }
+
+  return converted.join('\n');
+};
+
+const escapeAmpersandsOutsideAlignment = (value: string) => {
+  const alignmentEnvironments = new Set([
+    'array', 'tabular', 'tabular*', 'tabularx', 'longtable',
+    'align', 'align*', 'aligned', 'alignedat', 'alignedat*',
+    'matrix', 'pmatrix', 'bmatrix', 'Bmatrix', 'vmatrix', 'Vmatrix', 'smallmatrix',
+    'cases', 'split',
+  ]);
+  let alignmentDepth = 0;
+
+  return String(value || '').replace(/\\begin\{([^}]+)\}|\\end\{([^}]+)\}|(?<!\\)&/g, (token, beginEnv, endEnv) => {
+    if (beginEnv) {
+      if (alignmentEnvironments.has(String(beginEnv).trim())) {
+        alignmentDepth += 1;
+      }
+      return token;
+    }
+
+    if (endEnv) {
+      if (alignmentEnvironments.has(String(endEnv).trim())) {
+        alignmentDepth = Math.max(0, alignmentDepth - 1);
+      }
+      return token;
+    }
+
+    return alignmentDepth > 0 ? '&' : '\\&';
+  });
+};
+
 const normalizeLatexBody = (value: string) =>
-  wrapParenthesizedMathLikeSegments(
-    sanitizeMisplacedTableRules(
-      repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+  escapeAmpersandsOutsideAlignment(
+    wrapParenthesizedMathLikeSegments(
+      sanitizeMisplacedTableRules(
+        repairCasesRowSeparators(
+        repairTableRowSeparators(
+          repairMatrixRowSeparators(
+            convertPlainAmpersandTables(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+          )
+        )
+        )
+      )
+      .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
+      .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/gi, '')
+      .replace(/\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{[^}]+\}/gi, '')
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+      .replace(/\\graphicspath\{[^}]*\}/gi, '')
+      .replace(/\[\s*beginaligned/gi, '')
+      .replace(/\[\s*endaligned\s*\]/gi, '')
+      .replace(/\bbeginaligned\b/gi, '')
+      .replace(/\bendaligned\b/gi, '')
+      .replace(/(?<!\\)%/g, '\\%')
+      .replace(/\bMARKS_(\d+)\b/g, 'MARKS\\_$1')
+      .replace(/\bQUESTION_(\d+)\b/g, 'QUESTION\\_$1')
+      .replace(/(^|\s)([0-9]*[A-Za-z]+)\^\(([^)]+)\)/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{(${powerExpr})}}`)
+      .replace(/(^|\s)([0-9]*[A-Za-z]+)\^([A-Za-z])(?![A-Za-z0-9{])/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
+      .replace(/(^|\s)([0-9]*[A-Za-z]+)\^([0-9]+)(?=\b)/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
+      .replace(/∠/g, '\\ensuremath{\\angle}')
+      .replace(/≤/g, '\\ensuremath{\\le}')
+      .replace(/≥/g, '\\ensuremath{\\ge}')
+      .replace(/≠/g, '\\ensuremath{\\neq}')
+      .replace(/⇒/g, '\\ensuremath{\\Rightarrow}')
+      .replace(/→/g, '\\ensuremath{\\to}')
+      .replace(/↔/g, '\\ensuremath{\\leftrightarrow}')
+      .replace(/×/g, '\\ensuremath{\\times}')
+      .replace(/÷/g, '\\ensuremath{\\div}')
+      .replace(/π/g, '\\ensuremath{\\pi}')
+      .replace(/α/g, '\\ensuremath{\\alpha}')
+      .replace(/β/g, '\\ensuremath{\\beta}')
+      .replace(/γ/g, '\\ensuremath{\\gamma}')
+      .replace(/δ/g, '\\ensuremath{\\delta}')
+      .replace(/θ/g, '\\ensuremath{\\theta}')
+      .replace(/λ/g, '\\ensuremath{\\lambda}')
+      .replace(/μ/g, '\\ensuremath{\\mu}')
+      .replace(/σ/g, '\\ensuremath{\\sigma}')
+      .replace(/φ/g, '\\ensuremath{\\phi}')
+      .replace(/ω/g, '\\ensuremath{\\omega}')
+      .replace(/Δ/g, '\\ensuremath{\\Delta}')
+      .replace(/Σ/g, '\\ensuremath{\\Sigma}')
+      .replace(/Ω/g, '\\ensuremath{\\Omega}')
+      .replace(/√/g, '\\ensuremath{\\sqrt{}}')
+      .trim()
     )
-    .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
-    .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/gi, '')
-    .replace(/\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{[^}]+\}/gi, '')
-    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
-    .replace(/\\graphicspath\{[^}]*\}/gi, '')
-    .replace(/\[\s*beginaligned/gi, '')
-    .replace(/\[\s*endaligned\s*\]/gi, '')
-    .replace(/\bbeginaligned\b/gi, '')
-    .replace(/\bendaligned\b/gi, '')
-    .replace(/(?<!\\)&/g, '\\&')
-    .replace(/\bMARKS_(\d+)\b/g, 'MARKS\\_$1')
-    .replace(/\bQUESTION_(\d+)\b/g, 'QUESTION\\_$1')
-    .replace(/(^|\s)([0-9]*[A-Za-z]+)\^\(([^)]+)\)/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{(${powerExpr})}}`)
-    .replace(/(^|\s)([0-9]*[A-Za-z]+)\^([A-Za-z])(?![A-Za-z0-9{])/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
-    .replace(/(^|\s)([0-9]*[A-Za-z]+)\^([0-9]+)(?=\b)/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
-    .replace(/∠/g, '\\ensuremath{\\angle}')
-    .replace(/≤/g, '\\ensuremath{\\le}')
-    .replace(/≥/g, '\\ensuremath{\\ge}')
-    .replace(/≠/g, '\\ensuremath{\\neq}')
-    .replace(/⇒/g, '\\ensuremath{\\Rightarrow}')
-    .replace(/→/g, '\\ensuremath{\\to}')
-    .replace(/↔/g, '\\ensuremath{\\leftrightarrow}')
-    .replace(/×/g, '\\ensuremath{\\times}')
-    .replace(/÷/g, '\\ensuremath{\\div}')
-    .replace(/π/g, '\\ensuremath{\\pi}')
-    .replace(/α/g, '\\ensuremath{\\alpha}')
-    .replace(/β/g, '\\ensuremath{\\beta}')
-    .replace(/γ/g, '\\ensuremath{\\gamma}')
-    .replace(/δ/g, '\\ensuremath{\\delta}')
-    .replace(/θ/g, '\\ensuremath{\\theta}')
-    .replace(/λ/g, '\\ensuremath{\\lambda}')
-    .replace(/μ/g, '\\ensuremath{\\mu}')
-    .replace(/σ/g, '\\ensuremath{\\sigma}')
-    .replace(/φ/g, '\\ensuremath{\\phi}')
-    .replace(/ω/g, '\\ensuremath{\\omega}')
-    .replace(/Δ/g, '\\ensuremath{\\Delta}')
-    .replace(/Σ/g, '\\ensuremath{\\Sigma}')
-    .replace(/Ω/g, '\\ensuremath{\\Omega}')
-    .replace(/√/g, '\\ensuremath{\\sqrt{}}')
-    .trim()
   );
 
 const normalizePlainBody = (value: string) =>
@@ -382,26 +541,27 @@ const isInsideMathAt = (value: string, offset: number) => {
 };
 
 const applyCompileSafeLatexRepairs = (value: string) =>
-  stripInvalidControlChars(value)
-    .replace(/\[\s*([^\]]+)\s*\]/g, (match, candidate, offset, source) => {
-      const raw = String(candidate || '').trim();
-      if (!raw) return match;
-      // Avoid creating nested delimiters like $\(...\)$ when already in math mode.
-      if (isInsideMathAt(source, offset)) return match;
-      // Don't convert brackets that are part of \left[...\right] or after a LaTeX command
-      const before = source.slice(Math.max(0, offset - 10), offset);
-      if (/\\(left|right|begin|sqrt|operatorname)\s*$/.test(before)) return match;
-      if (/\\right\b/.test(raw)) return match;
-      if (!/(=|\^|\\frac|\bfrac\b|\b(sin|cos|tan|sec|cosec|cot)\b|\d)/i.test(raw)) {
-        return match;
-      }
-      const repaired = ocrMathTokenRepair(raw);
-      return `\\(${repaired}\\)`;
-    })
-    .replace(/(?<!\\)&/g, '\\&')
-    .replace(/(?<!\\)_/g, (_match, offset, source) => (isInsideMathAt(source, offset) ? '_' : '\\_'))
-    .replace(/(?<!\\)%/g, '\\%')
-    .replace(/(?<!\\)#/g, '\\#');
+  escapeAmpersandsOutsideAlignment(
+    stripInvalidControlChars(value)
+      .replace(/\[\s*([^\]]+)\s*\]/g, (match, candidate, offset, source) => {
+        const raw = String(candidate || '').trim();
+        if (!raw) return match;
+        // Avoid creating nested delimiters like $\(...\)$ when already in math mode.
+        if (isInsideMathAt(source, offset)) return match;
+        // Don't convert brackets that are part of \left[...\right] or after a LaTeX command
+        const before = source.slice(Math.max(0, offset - 10), offset);
+        if (/\\(left|right|begin|sqrt|operatorname)\s*$/.test(before)) return match;
+        if (/\\right\b/.test(raw)) return match;
+        if (!/(=|\^|\\frac|\bfrac\b|\b(sin|cos|tan|sec|cosec|cot)\b|\d)/i.test(raw)) {
+          return match;
+        }
+        const repaired = ocrMathTokenRepair(raw);
+        return `\\(${repaired}\\)`;
+      })
+      .replace(/(?<!\\)_/g, (_match, offset, source) => (isInsideMathAt(source, offset) ? '_' : '\\_'))
+      .replace(/(?<!\\)%/g, '\\%')
+      .replace(/(?<!\\)#/g, '\\#')
+  );
 
 const isEscapedAt = (chars: string[], index: number) => {
   let backslashes = 0;
@@ -520,7 +680,13 @@ const finalizeCompileSafeBody = (value: string) =>
   neutralizeUnknownLatexCommands(
     balanceMathDelimiters(
       unwrapInlineMathInsideDisplayMath(
-        normalizeInlineDollarMath(balanceLatexBraces(repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(value))))
+        normalizeInlineDollarMath(
+          balanceLatexBraces(
+            repairCasesRowSeparators(
+              repairTableRowSeparators(repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(value)))
+            )
+          )
+        )
       )
     )
   );
