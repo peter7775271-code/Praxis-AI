@@ -4405,7 +4405,12 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       const response = await fetch(url);
       const data = await response.json().catch(() => ([]));
       const rows = Array.isArray(data) ? data : [];
-      return rows.filter((q) => !isExamIncomplete((q as any)?.exam_incomplete)) as Question[];
+      return rows.filter((q) => {
+        if (isExamIncomplete((q as any)?.exam_incomplete)) return false;
+        const topic = String((q as any)?.topic || '').trim().toLowerCase();
+        if (topic === 'unspecified') return false;
+        return true;
+      }) as Question[];
     } catch (err) {
       console.error('Error loading questions for builder:', err);
       return [] as Question[];
@@ -4518,7 +4523,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       });
 
       const filtered = gradeSubjectPool.filter((q) => {
-        if (params.topics.length > 0 && !params.topics.includes(String(q.topic))) return false;
+        const topic = String(q.topic || '').trim();
+        if (topic.toLowerCase() === 'unspecified') return false;
+        if (params.topics.length > 0 && !params.topics.includes(topic)) return false;
 
         const subtopics = params.subtopics || [];
         const dotPoints = params.dotPoints || [];

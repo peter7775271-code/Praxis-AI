@@ -45,6 +45,10 @@ export default function SettingsView({
   const [unspecifiedTopicStatus, setUnspecifiedTopicStatus] = React.useState<'idle' | 'success' | 'error'>('idle');
   const [unspecifiedTopicResult, setUnspecifiedTopicResult] = React.useState('');
   const [unspecifiedTopicOutputs, setUnspecifiedTopicOutputs] = React.useState<any[]>([]);
+  const [isRunningPdfPostProcess, setIsRunningPdfPostProcess] = React.useState(false);
+  const [pdfPostProcessStatus, setPdfPostProcessStatus] = React.useState<'idle' | 'success' | 'error'>('idle');
+  const [pdfPostProcessResult, setPdfPostProcessResult] = React.useState('');
+  const [pdfPostProcessOutputs, setPdfPostProcessOutputs] = React.useState<any[]>([]);
   const [showQuestionTokensModal, setShowQuestionTokensModal] = React.useState(false);
   const [selectedQuestionPackage, setSelectedQuestionPackage] = React.useState<string | null>(null);
   const [isProcessingQuestionTokenPurchase, setIsProcessingQuestionTokenPurchase] = React.useState(false);
@@ -215,6 +219,71 @@ export default function SettingsView({
       setUnspecifiedTopicOutputs([]);
     } finally {
       setIsClassifyingUnspecifiedTopics(false);
+    }
+  };
+
+  const runPdfPostProcess = async () => {
+    if (!selectedSyllabusMappingPaper) {
+      setPdfPostProcessStatus('error');
+      setPdfPostProcessResult('Select an exam first.');
+      setPdfPostProcessOutputs([]);
+      return;
+    }
+
+    const selectedPaper = availablePapers.find((paper: any) => getPaperKey(paper) === selectedSyllabusMappingPaper);
+    if (!selectedPaper) {
+      setPdfPostProcessStatus('error');
+      setPdfPostProcessResult('Selected exam is no longer available.');
+      setPdfPostProcessOutputs([]);
+      return;
+    }
+
+    try {
+      setIsRunningPdfPostProcess(true);
+      setPdfPostProcessStatus('idle');
+      setPdfPostProcessResult('');
+      setPdfPostProcessOutputs([]);
+
+      const response = await fetch('/api/hsc/pdf-post-process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grade: selectedPaper.grade,
+          year: selectedPaper.year,
+          subject: selectedPaper.subject,
+          school: selectedPaper.school,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setPdfPostProcessStatus('error');
+        setPdfPostProcessResult(String(data?.error || `Post-processing failed (${response.status})`));
+        setPdfPostProcessOutputs([]);
+        return;
+      }
+
+      const totals = data?.totals || {};
+      setPdfPostProcessStatus('success');
+      setPdfPostProcessResult(
+        `Classified ${totals.foundUnspecified || 0} unspecified questions and recovered ${totals.recoveredNotEnoughContext || 0} of ${totals.foundNotEnoughContext || 0} NOT_ENOUGH_CONTEXT answers.`
+      );
+
+      const classifyOutputs = Array.isArray(data?.unspecifiedClassification?.outputs)
+        ? data.unspecifiedClassification.outputs.map((entry: any) => ({ ...entry, _kind: 'classification' }))
+        : [];
+      const recoveryOutputs = Array.isArray(data?.recoveryOutputs)
+        ? data.recoveryOutputs.map((entry: any) => ({ ...entry, _kind: 'recovery' }))
+        : [];
+      setPdfPostProcessOutputs([...classifyOutputs, ...recoveryOutputs]);
+
+      fetchAllQuestions({ includeIncomplete: true });
+    } catch (error) {
+      setPdfPostProcessStatus('error');
+      setPdfPostProcessResult(error instanceof Error ? error.message : 'Failed to post-process exam');
+      setPdfPostProcessOutputs([]);
+    } finally {
+      setIsRunningPdfPostProcess(false);
     }
   };
 
@@ -1773,6 +1842,7 @@ POINT_1 ...`}
                       )}
 
                       {showDeveloperTools && isDevMode && (
+                        <>
                         <div
                           className="p-6 rounded-2xl border mt-6"
                           style={{
@@ -1782,7 +1852,7 @@ POINT_1 ...`}
                         >
                           <h2 className="text-xl font-semibold mb-4" style={{ color: 'var(--clr-primary-a50)' }}>PDF Intake</h2>
                           <p className="text-sm mb-4" style={{ color: 'var(--clr-surface-a40)' }}>
-                            Upload the exam PDF and/or the marking criteria PDF. The response will be used to create new questions automatically.
+                            Upload the exam PDF and/or the marking criteria PDF. This step only ingests questions and criteria into the database.
                           </p>
 
                           <div className="space-y-4">
@@ -2037,6 +2107,147 @@ POINT_1 ...`}
                             )}
                           </div>
                         </div>
+
+                        <div
+                          className="p-6 rounded-2xl border mt-6"
+                          style={{
+                            backgroundColor: 'var(--clr-surface-a10)',
+                            borderColor: 'var(--clr-surface-tonal-a20)',
+                          }}
+                        >
+                          <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--clr-primary-a50)' }}>
+                            Post-Ingest Classification + Recovery
+                          </h2>
+                          <p className="text-sm mb-4" style={{ color: 'var(--clr-surface-a40)' }}>
+                            Run this after ingest to classify topics for unspecified questions and recover sample answers marked as NOT_ENOUGH_CONTEXT.
+                          </p>
+
+                          <div className="space-y-4">
+                            <div>
+                              <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Exam</label>
+                              <div className="mt-2 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 items-center">
+                                <select
+                                  value={selectedSyllabusMappingPaper}
+                                  onChange={(e) => setSelectedSyllabusMappingPaper(e.target.value)}
+                                  disabled={isRunningPdfPostProcess || loadingQuestions || availablePapers.length === 0}
+                                  className="w-full px-4 py-2 rounded-lg border"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                >
+                                  {availablePapers.length === 0 ? (
+                                    <option value="">{loadingQuestions ? 'Loading exams…' : 'No exam papers loaded'}</option>
+                                  ) : (
+                                    availablePapers.map((paper) => (
+                                      <option key={getPaperKey(paper)} value={getPaperKey(paper)}>
+                                        {paper.year} • {paper.grade} • {paper.subject} • {paper.school} ({paper.count} questions)
+                                      </option>
+                                    ))
+                                  )}
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => void fetchAllQuestions({ includeIncomplete: true })}
+                                  disabled={loadingQuestions || isRunningPdfPostProcess}
+                                  className="px-4 py-2 rounded-lg text-sm font-medium cursor-pointer disabled:opacity-50"
+                                  style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-primary-a50)' }}
+                                >
+                                  {loadingQuestions ? 'Loading…' : 'Refresh Exams'}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={runPdfPostProcess}
+                                disabled={isRunningPdfPostProcess || availablePapers.length === 0 || !selectedSyllabusMappingPaper}
+                                className="px-4 py-2 rounded-lg font-medium cursor-pointer disabled:opacity-50"
+                                style={{
+                                  backgroundColor: 'var(--clr-primary-a0)',
+                                  color: 'var(--clr-dark-a0)',
+                                }}
+                              >
+                                {isRunningPdfPostProcess ? 'Running...' : 'Run Classification + Recovery'}
+                              </button>
+                              {pdfPostProcessResult && (
+                                <span
+                                  className="text-sm"
+                                  style={{
+                                    color:
+                                      pdfPostProcessStatus === 'error'
+                                        ? 'var(--clr-danger-a10)'
+                                        : pdfPostProcessStatus === 'success'
+                                          ? 'var(--clr-success-a10)'
+                                          : 'var(--clr-surface-a50)',
+                                  }}
+                                >
+                                  {pdfPostProcessResult}
+                                </span>
+                              )}
+                            </div>
+
+                            {pdfPostProcessOutputs.length > 0 && (
+                              <div
+                                className="mt-3 rounded-xl border p-4 max-h-96 overflow-y-auto custom-scrollbar"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                }}
+                              >
+                                <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--clr-primary-a50)' }}>
+                                  Post-Process Output
+                                </h3>
+                                <div className="space-y-3">
+                                  {pdfPostProcessOutputs.map((entry, index) => {
+                                    const kind = String(entry?._kind || '');
+                                    const topic = String(entry?.topic || '').trim();
+                                    const subtopic = String(entry?.subtopic || '').trim();
+                                    const reason = String(entry?.reason || '').trim();
+                                    const rawText = String(entry?.rawTextOutput || entry?.rawModelOutput || '').trim();
+                                    const heading =
+                                      kind === 'classification'
+                                        ? `Q${entry?.questionNumber || 'unknown'} • ${entry?.success ? `${topic}${subtopic ? ` → ${subtopic}` : ''}` : 'Classification failed'}`
+                                        : `Q${entry?.questionNumber || 'unknown'} • ${entry?.success ? 'Recovered sample answer' : 'Recovery failed'}`;
+                                    return (
+                                      <div
+                                        key={`${entry?.questionId || 'q'}-${kind}-${index}`}
+                                        className="rounded-lg border p-3"
+                                        style={{
+                                          backgroundColor: 'var(--clr-surface-a10)',
+                                          borderColor: 'var(--clr-surface-tonal-a20)',
+                                        }}
+                                      >
+                                        <p className="text-xs font-medium mb-2" style={{ color: 'var(--clr-surface-a50)' }}>
+                                          {heading}
+                                        </p>
+                                        {reason && (
+                                          <p className="text-xs mb-2" style={{ color: 'var(--clr-surface-a40)' }}>
+                                            {reason}
+                                          </p>
+                                        )}
+                                        {rawText && (
+                                          <pre
+                                            className="text-xs whitespace-pre-wrap break-words rounded-md p-2 mt-2"
+                                            style={{
+                                              backgroundColor: 'var(--clr-dark-a0)',
+                                              color: 'var(--clr-light-a0)',
+                                            }}
+                                          >
+                                            {rawText}
+                                          </pre>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        </>
                       )}
 
                       {showDeveloperTools && isDevMode && (

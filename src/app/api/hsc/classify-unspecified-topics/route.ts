@@ -206,6 +206,7 @@ export async function POST(request: Request) {
 
     let updated = 0;
     let failed = 0;
+    let skippedAlreadyClassified = 0;
     const outputs: Array<Record<string, unknown>> = [];
 
     for (const question of toProcess) {
@@ -289,13 +290,15 @@ export async function POST(request: Request) {
           continue;
         }
 
-        const { error: updateError } = await supabaseAdmin
+        const { data: updatedRows, error: updateError } = await supabaseAdmin
           .from('hsc_questions')
           .update({
             topic,
             subtopic,
           })
-          .eq('id', question.id);
+          .eq('id', question.id)
+          .in('topic', ['Unspecified', 'unspecified'])
+          .select('id');
 
         if (updateError) {
           failed += 1;
@@ -304,6 +307,21 @@ export async function POST(request: Request) {
             questionNumber: question.question_number,
             success: false,
             reason: `DB update failed: ${updateError.message}`,
+            rawModelOutput: rawOutput,
+            rawTextOutput: rawOutput,
+            parsedModelOutput: parsed,
+          });
+          continue;
+        }
+
+        if (!Array.isArray(updatedRows) || updatedRows.length === 0) {
+          skippedAlreadyClassified += 1;
+          outputs.push({
+            questionId: question.id,
+            questionNumber: question.question_number,
+            success: false,
+            skipped: true,
+            reason: 'Skipped because question already had a non-unspecified topic',
             rawModelOutput: rawOutput,
             rawTextOutput: rawOutput,
             parsedModelOutput: parsed,
@@ -348,6 +366,7 @@ export async function POST(request: Request) {
         processed: toProcess.length,
         updated,
         failed,
+        skippedAlreadyClassified,
       },
       outputs,
     });
