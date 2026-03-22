@@ -120,6 +120,7 @@ const Excalidraw = dynamic(
 
 const CUSTOM_EXAM_STORAGE_KEY = 'currentCustomExam';
 const CUSTOM_EXAM_SESSION_STORAGE_KEY = 'currentCustomExam:session';
+const CUSTOM_EXAM_MAX_QUESTIONS = 25;
 
 const isQuotaExceededError = (error: unknown) => {
   if (error instanceof DOMException) {
@@ -4402,6 +4403,19 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     return arr;
   };
 
+  const orderMultipleChoiceFirst = (items: Question[]) => {
+    const mcq: Question[] = [];
+    const written: Question[] = [];
+    for (const item of items) {
+      if (item.question_type === 'multiple_choice') {
+        mcq.push(item);
+      } else {
+        written.push(item);
+      }
+    }
+    return [...mcq, ...written];
+  };
+
   const loadQuestionsForBuilder = async (grade?: string, subject?: string) => {
     try {
       setLoadingQuestions(true);
@@ -4521,6 +4535,10 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const initializeCustomExam = async (params: ExamBuilderParams) => {
     setIsInitializingExam(true);
     try {
+      if (!params.includeWritten && !params.includeMultipleChoice) {
+        return { ok: false, message: 'Select at least one question type: Written or Multiple choice.' };
+      }
+
       clearPaperState();
       const pool = await loadQuestionsForBuilder(params.grade, params.subject);
       const gradeSubjectPool = pool.filter((q) => {
@@ -4533,6 +4551,10 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         const topic = String(q.topic || '').trim();
         if (topic.toLowerCase() === 'unspecified') return false;
         if (params.topics.length > 0 && !params.topics.includes(topic)) return false;
+
+        const isMultipleChoice = q.question_type === 'multiple_choice';
+        if (isMultipleChoice && !params.includeMultipleChoice) return false;
+        if (!isMultipleChoice && !params.includeWritten) return false;
 
         const subtopics = params.subtopics || [];
         const dotPoints = params.dotPoints || [];
@@ -4553,24 +4575,31 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
       const shuffled = shuffleQuestions(filtered);
       const useAllQuestionsFromTopic = Boolean(params.allQuestionsFromTopic) && params.topics.length === 1;
-      const targetCount = useAllQuestionsFromTopic ? shuffled.length : Math.min(params.intensity, shuffled.length);
+      const targetCount = Math.min(
+        useAllQuestionsFromTopic ? shuffled.length : params.intensity,
+        shuffled.length,
+        CUSTOM_EXAM_MAX_QUESTIONS
+      );
       const selected = shuffled.slice(0, targetCount);
       const manualGroupedSelection = expandManualGroupedSelection(selected, gradeSubjectPool, customExamGroupByQuestionId);
       const romanGroupedSelection = expandRomanSubpartSelection(manualGroupedSelection, gradeSubjectPool);
       const finalSelectionWithSharedImages = applySiblingGraphImages(romanGroupedSelection);
+      const orderedSelection = params.includeMultipleChoice
+        ? orderMultipleChoiceFirst(finalSelectionWithSharedImages)
+        : finalSelectionWithSharedImages;
 
-      if (!finalSelectionWithSharedImages.length) {
+      if (!orderedSelection.length) {
         return { ok: false, message: 'Not enough questions to build this exam.' };
       }
 
-      const totalPossible = finalSelectionWithSharedImages.reduce((sum, q) => sum + (q.marks || 0), 0);
+      const totalPossible = orderedSelection.reduce((sum, q) => sum + (q.marks || 0), 0);
       const exam = {
         type: 'exam',
         id: Date.now(),
         paperYear: 'Custom',
         paperSubject: params.subject,
         paperGrade: params.grade,
-        examAttempts: finalSelectionWithSharedImages.map((q) => ({ question: q, submittedAnswer: null, feedback: null })),
+        examAttempts: orderedSelection.map((q) => ({ question: q, submittedAnswer: null, feedback: null })),
         totalScore: 0,
         totalPossible,
         savedAt: new Date().toISOString(),
@@ -4589,13 +4618,13 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         }
       }
 
-      const customPaper = { year: 'Custom', subject: params.subject, grade: params.grade, school: 'Custom', count: finalSelectionWithSharedImages.length };
+      const customPaper = { year: 'Custom', subject: params.subject, grade: params.grade, school: 'Custom', count: orderedSelection.length };
       const storagePayload = {
         activePaper: customPaper,
-        questions: finalSelectionWithSharedImages,
+        questions: orderedSelection,
         createdAt: new Date().toISOString(),
       };
-      const compactQuestions = finalSelectionWithSharedImages.map((q) => ({
+      const compactQuestions = orderedSelection.map((q) => ({
         ...q,
         graph_image_data: null,
         sample_answer_image: null,
@@ -4644,7 +4673,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       // and should not block exam generation when they are at 0.
 
       setActivePaper(customPaper);
-      setPaperQuestions(finalSelectionWithSharedImages);
+      setPaperQuestions(orderedSelection);
       setPaperIndex(0);
       if (params.cognitive) {
         startExamSimulation(params.subject);

@@ -549,14 +549,14 @@ export function ExamBuilderView({
   initialSubject?: string | null;
   initialGrade?: 'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12' | null;
 }) {
-  const [isSimMode, setIsSimMode] = useState(false);
   const [subject, setSubject] = useState<string>(initialSubject ?? 'Mathematics Advanced');
   const [grade, setGrade] = useState<'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12'>(
     (initialGrade as any) ?? 'Year 12'
   );
-  const [intensity, setIntensity] = useState<number>(35);
+  const [intensity, setIntensity] = useState<number>(25);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
-  const [allQuestionsFromTopic, setAllQuestionsFromTopic] = useState(false);
+  const [includeWritten, setIncludeWritten] = useState(true);
+  const [includeMultipleChoice, setIncludeMultipleChoice] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mindmapOpen, setMindmapOpen] = useState(false);
   const [mindmapSelection, setMindmapSelection] = useState<MindmapSelection>({ subtopics: [], dotPoints: [] });
@@ -582,23 +582,22 @@ export function ExamBuilderView({
     setSelectedTopics((prev) => prev.filter((t) => topicsForSelection.includes(t)));
   }, [topicsForSelection]);
 
-  useEffect(() => {
-    const hasSyllabusRestrictions = mindmapSelection.subtopics.length > 0 || mindmapSelection.dotPoints.length > 0;
-    const hasSingleTopic = selectedTopics.length === 1;
-    if (hasSyllabusRestrictions || !hasSingleTopic) {
-      setAllQuestionsFromTopic(false);
-    }
-  }, [mindmapSelection.dotPoints.length, mindmapSelection.subtopics.length, selectedTopics.length]);
-
   const handleInitialize = async () => {
     setError(null);
+    if (!includeWritten && !includeMultipleChoice) {
+      setError('Select at least one question type: Written or Multiple choice.');
+      return;
+    }
+
     const result = await onInitializeExam({
       subject,
       grade,
       intensity,
       topics: selectedTopics,
-      allQuestionsFromTopic,
-      cognitive: isSimMode,
+      includeWritten,
+      includeMultipleChoice,
+      allQuestionsFromTopic: false,
+      cognitive: false,
       subtopics: mindmapSelection.subtopics,
       dotPoints: mindmapSelection.dotPoints,
     });
@@ -613,8 +612,7 @@ export function ExamBuilderView({
         <h1 className="text-5xl font-light text-neutral-900">Exam <span className="font-bold italic">Architect</span></h1>
         <p className="text-neutral-500 text-lg">Select your parameters to initiate an adaptive assessment.</p>
       </div>
-      <div className={`glass-card rounded-[3rem] p-12 space-y-12 relative overflow-hidden transition-all duration-500 ${isSimMode ? 'border-amber-400/50 bg-amber-50/10' : ''}`}>
-        {isSimMode && <div className="absolute top-0 left-0 w-full h-1 bg-amber-400 animate-pulse" />}
+      <div className="glass-card rounded-[3rem] p-12 space-y-12 relative overflow-hidden transition-all duration-500">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
           <div className="space-y-4">
             <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400 flex items-center">
@@ -647,21 +645,41 @@ export function ExamBuilderView({
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400">Question count</label>
-              <span className="text-sm font-bold text-[#b5a45d]">{allQuestionsFromTopic ? 'ALL' : intensity}</span>
+              <span className="text-sm font-bold text-[#b5a45d]">{intensity}</span>
             </div>
             <input
               type="range"
               min={10}
-              max={100}
+              max={25}
               step={5}
               value={intensity}
               onChange={(e) => setIntensity(Number(e.target.value))}
-              disabled={allQuestionsFromTopic}
               className="w-full accent-[#b5a45d] h-1.5 bg-neutral-100 rounded-lg appearance-none cursor-pointer"
             />
-            <p className="text-[11px] text-neutral-400">
-              {allQuestionsFromTopic ? 'Using every available question from the selected topic.' : 'Set how many questions to include.'}
-            </p>
+            <p className="text-[11px] text-neutral-400">Set how many questions to include (maximum 25).</p>
+
+            <div className="pt-3 space-y-3">
+              <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400">Question types</label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  aria-pressed={includeWritten}
+                  onClick={() => setIncludeWritten((prev) => !prev)}
+                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${includeWritten ? 'bg-[#b5a45d] text-white' : 'bg-neutral-50 border border-neutral-100 text-neutral-600'}`}
+                >
+                  Written
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={includeMultipleChoice}
+                  onClick={() => setIncludeMultipleChoice((prev) => !prev)}
+                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all ${includeMultipleChoice ? 'bg-[#b5a45d] text-white' : 'bg-neutral-50 border border-neutral-100 text-neutral-600'}`}
+                >
+                  Multiple choice
+                </button>
+              </div>
+              <p className="text-[11px] text-neutral-400">When enabled, multiple-choice questions appear at the start of the exam.</p>
+            </div>
           </div>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -715,7 +733,6 @@ export function ExamBuilderView({
                   type="button"
                   onClick={() => {
                     setSelectedTopics([]);
-                    setAllQuestionsFromTopic(false);
                   }}
                   className={`w-full px-4 py-3 rounded-xl text-sm font-semibold transition-all ${allTopicsActive ? 'bg-neutral-900 text-white' : 'bg-neutral-50 border border-neutral-100 text-neutral-500'}`}
                 >
@@ -740,47 +757,10 @@ export function ExamBuilderView({
                     })}
                   </div>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setAllQuestionsFromTopic((prev) => !prev)}
-                  disabled={selectedTopics.length !== 1}
-                  className={`w-full px-4 py-3 rounded-xl text-xs font-semibold transition-all ${
-                    allQuestionsFromTopic
-                      ? 'bg-[#b5a45d] text-white'
-                      : 'bg-neutral-50 border border-neutral-100 text-neutral-600'
-                  } ${selectedTopics.length !== 1 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  title={selectedTopics.length === 1 ? 'Generate all questions from this topic' : 'Select exactly one topic to enable'}
-                >
-                  {allQuestionsFromTopic ? 'All Questions From Selected Topic: ON' : 'All Questions From Selected Topic'}
-                </button>
-                {selectedTopics.length !== 1 && (
-                  <p className="text-[11px] text-neutral-400">Select exactly one topic to enable this mode.</p>
-                )}
               </div>
             )}
           </div>
-          <div className="space-y-4">
-            <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400">Cognitive Environment</label>
-            <button type="button" onClick={() => setIsSimMode(!isSimMode)} className={`w-full flex items-center justify-between p-5 rounded-2xl border cursor-pointer transition-all text-left ${isSimMode ? 'bg-neutral-900 border-neutral-900 text-white shadow-2xl' : 'bg-neutral-50 border-neutral-100 text-neutral-400'}`}>
-              <div className="flex items-center space-x-3">
-                <Timer size={18} className={isSimMode ? 'text-[#b5a45d]' : ''} />
-                <span className="text-sm font-bold uppercase tracking-widest">Pressure Chamber</span>
-              </div>
-              <div className={`w-10 h-5 rounded-full relative transition-colors ${isSimMode ? 'bg-[#b5a45d]' : 'bg-neutral-200'}`}>
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${isSimMode ? 'left-6' : 'left-0.5'}`} />
-              </div>
-            </button>
-          </div>
         </div>
-        {isSimMode && (
-          <div className="p-6 bg-amber-50 rounded-2xl border border-amber-200/50 flex items-start space-x-4">
-            <div className="p-2 bg-white rounded-xl text-amber-600"><Zap size={20} /></div>
-            <div>
-              <h4 className="text-xs font-bold text-amber-900 uppercase tracking-widest mb-1">Simulator Active</h4>
-              <p className="text-xs text-amber-800/70">Calculators disabled (unless required), strictly timed intervals, and 10-second penalty for window refocusing.</p>
-            </div>
-          </div>
-        )}
         {error && (
           <div className="p-4 rounded-2xl border" style={{ backgroundColor: 'var(--clr-danger-a0)', borderColor: 'var(--clr-danger-a20)', color: 'var(--clr-light-a0)' }}>
             {error}

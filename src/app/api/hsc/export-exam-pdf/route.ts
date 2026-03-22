@@ -624,6 +624,50 @@ const unwrapInlineMathInsideDisplayMath = (value: string) =>
       return `$$${normalizedBody}$$`;
     });
 
+const unwrapParenMathInsideInlineDollar = (value: string) => {
+  const source = String(value || '');
+  let output = '';
+  let index = 0;
+
+  while (index < source.length) {
+    const current = source[index];
+    if (current !== '$' || isEscapedInStringAt(source, index)) {
+      output += current;
+      index += 1;
+      continue;
+    }
+
+    const next = source[index + 1];
+    if (next === '$' && !isEscapedInStringAt(source, index + 1)) {
+      output += '$$';
+      index += 2;
+      continue;
+    }
+
+    let closingIndex = -1;
+    for (let scan = index + 1; scan < source.length; scan += 1) {
+      if (source[scan] !== '$' || isEscapedInStringAt(source, scan)) continue;
+      const scanNext = source[scan + 1];
+      if (scanNext === '$' && !isEscapedInStringAt(source, scan + 1)) continue;
+      closingIndex = scan;
+      break;
+    }
+
+    if (closingIndex === -1) {
+      output += source.slice(index);
+      break;
+    }
+
+    const body = source
+      .slice(index + 1, closingIndex)
+      .replace(/\\\(([\s\S]*?)\\\)/g, '$1');
+    output += `$${body}$`;
+    index = closingIndex + 1;
+  }
+
+  return output;
+};
+
 const balanceMathDelimiters = (value: string) => {
   const chars = Array.from(value);
   let inlineDollarOpen = false;
@@ -679,7 +723,8 @@ const balanceMathDelimiters = (value: string) => {
 const finalizeCompileSafeBody = (value: string) =>
   neutralizeUnknownLatexCommands(
     balanceMathDelimiters(
-      unwrapInlineMathInsideDisplayMath(
+      unwrapParenMathInsideInlineDollar(
+        unwrapInlineMathInsideDisplayMath(
         normalizeInlineDollarMath(
           balanceLatexBraces(
             repairCasesRowSeparators(
@@ -687,6 +732,7 @@ const finalizeCompileSafeBody = (value: string) =>
             )
           )
         )
+      )
       )
     )
   );
@@ -995,7 +1041,9 @@ const buildExamLatex = ({
     if (plainTextMode) {
       return escapeLatexText(normalized);
     }
-    const displaySafeNormalized = unwrapInlineMathInsideDisplayMath(normalized);
+    const displaySafeNormalized = unwrapParenMathInsideInlineDollar(
+      unwrapInlineMathInsideDisplayMath(normalized)
+    );
     if (compileSafeMode) {
       return finalizeCompileSafeBody(applyCompileSafeLatexRepairs(displaySafeNormalized));
     }
@@ -1101,7 +1149,7 @@ const buildExamLatex = ({
     }
   };
 
-  // Group consecutive questions that share the same base+subPart and have roman numerals.
+  // Group consecutive questions by renumbered base so subparts can render under one header.
   const bodyParts: string[] = [];
   let cursor = 0;
   while (cursor < questions.length) {
@@ -1150,7 +1198,44 @@ const buildExamLatex = ({
       }
 
       lines.push('\\vspace{0.9em}');
-      bodyParts.push(lines.join('\n'));
+      bodyParts.push(['\\filbreak', lines.join('\n')].join('\n'));
+    } else if (details.subPart && !details.roman) {
+      // Group lettered subparts (a), (b), (c) under a single Question N header.
+      const groupMappedMain = details.mappedMain;
+      const groupStart = cursor;
+      while (cursor < questions.length) {
+        const d = parsedDetails[cursor];
+        if (d.mappedMain !== groupMappedMain || !d.subPart || d.roman) break;
+        cursor += 1;
+      }
+
+      const groupQuestions = questions.slice(groupStart, cursor);
+      const groupDetails = parsedDetails.slice(groupStart, cursor);
+      const totalMarks = groupQuestions.reduce((sum, q) => sum + Number(q.marks || 0), 0);
+      const totalMarksLabel = totalMarks > 0 ? `${totalMarks} ${totalMarks === 1 ? 'mark' : 'marks'}` : '';
+
+      const lines: string[] = [];
+      const groupLabel = `Question ${details.mappedMain}`;
+      lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
+      lines.push(`\\textbf{${escapeLatexText(groupLabel)}}${totalMarksLabel ? ` & \\textbf{${escapeLatexText(totalMarksLabel)}}` : ' & '}\\\\[0.5em]`);
+      lines.push('\\end{tabular*}');
+
+      for (let gi = 0; gi < groupQuestions.length; gi += 1) {
+        const subQ = groupQuestions[gi];
+        const subD = groupDetails[gi];
+        const subMarks = Number(subQ.marks || 0);
+        const subQuestionText = renderBody(String(subQ.question_text || '')) || 'No question text provided.';
+
+        lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.subPart || '')})} ${subQuestionText}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
+        lines.push('');
+        renderQuestionContent(subQ, lines, '', true);
+        if (gi < groupQuestions.length - 1) {
+          lines.push('\\vspace{0.5em}');
+        }
+      }
+
+      lines.push('\\vspace{0.9em}');
+      bodyParts.push(['\\filbreak', lines.join('\n')].join('\n'));
     } else {
       // Standalone question (no roman sub-parts)
       const questionLabel = `Question ${details.mappedMain}${details.subPart ? ` (${details.subPart})` : ''}`;
@@ -1160,7 +1245,7 @@ const buildExamLatex = ({
       lines.push('\\end{tabular*}');
       renderQuestionContent(question, lines);
       lines.push('\\vspace{0.9em}');
-      bodyParts.push(lines.join('\n'));
+      bodyParts.push(['\\filbreak', lines.join('\n')].join('\n'));
       cursor += 1;
     }
   }
