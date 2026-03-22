@@ -564,7 +564,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
   const isGroupingEligibleSubject = (subjectValue: string | null | undefined) => {
     const normalized = String(subjectValue || '').trim().toLowerCase();
-    return normalized === 'mathematics' || normalized === 'mathematics advanced';
+    return normalized === 'mathematics'
+      || normalized === 'mathematics advanced'
+      || normalized.includes('mathematics standard');
   };
 
   const normalizeSubject = (value: string | null | undefined) => String(value || '').trim().toLowerCase();
@@ -572,6 +574,11 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const isMathematicsAdvancedSubject = (value: string | null | undefined) => {
     const normalized = normalizeSubject(value);
     return normalized.includes('mathematics advanced') || normalized === 'mathematics';
+  };
+
+  const isMathematicsLetterGroupingSubject = (value: string | null | undefined) => {
+    const normalized = normalizeSubject(value);
+    return isMathematicsAdvancedSubject(normalized) || normalized.includes('mathematics standard');
   };
 
   const isMathematicsExtensionSubject = (value: string | null | undefined) => {
@@ -751,7 +758,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
   const expandRomanSubpartSelection = (selected: Question[], sourcePool: Question[]) => {
     const getAdvancedLetterGroupKey = (question: Question) => {
-      if (!isMathematicsAdvancedSubject(question.subject)) return null;
+      if (!isMathematicsLetterGroupingSubject(question.subject)) return null;
       const parsed = parseQuestionNumberForSort(question.question_number);
       if (!parsed.part || !Number.isFinite(parsed.number)) return null;
       const paperNumber = String((question as any).paper_number ?? '');
@@ -931,7 +938,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     if (persistedGroupKey) return `persisted:${persistedGroupKey}`;
 
     const parsed = parseQuestionNumberParts(question.question_number);
-    if (isMathematicsAdvancedSubject(question.subject) && parsed.number !== null && parsed.letter) {
+    if (isMathematicsLetterGroupingSubject(question.subject) && parsed.number !== null && parsed.letter) {
       return `advanced:${parsed.number}`;
     }
     if (isMathematicsExtensionSubject(question.subject) && parsed.number !== null && parsed.letter && parsed.roman) {
