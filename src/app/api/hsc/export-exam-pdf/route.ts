@@ -145,11 +145,12 @@ const normalizeGreekWordTokens = (value: string) =>
     .replace(/(?<!\\)\btheta\b/gi, '\\theta')
     .replace(/(?<!\\)\bpi\b/gi, '\\pi');
 
+const ENSUREMATH_PREFIX_LOOKBACK = '\\ensuremath{'.length + 24;
+
 const wrapBareImplicationCommandsOutsideMath = (value: string) =>
   String(value || '').replace(/\\(?:Rightarrow|leftrightarrow|to)(?![A-Za-z])/g, (match, offset, source) => {
-    const index = Number(offset);
-    if (!Number.isFinite(index) || index < 0) return match;
-    if (source.slice(Math.max(0, index - 32), index).endsWith('\\ensuremath{')) return match;
+    const index = offset;
+    if (source.slice(Math.max(0, index - ENSUREMATH_PREFIX_LOOKBACK), index).endsWith('\\ensuremath{')) return match;
     if (isInsideMathAt(source, index)) return match;
     return `\\ensuremath{${match}}`;
   });
