@@ -145,12 +145,13 @@ const normalizeGreekWordTokens = (value: string) =>
     .replace(/(?<!\\)\btheta\b/gi, '\\theta')
     .replace(/(?<!\\)\bpi\b/gi, '\\pi');
 
-// Look back far enough to catch the immediately surrounding "\ensuremath{" prefix,
-// plus nearby whitespace/formatting noise before the wrapped command.
-const ENSUREMATH_PREFIX_LOOKBACK = '\\ensuremath{'.length + 24;
+const ENSUREMATH_PREFIX_LENGTH = '\\ensuremath{'.length;
+// Allow for minor spacing/noise between prefix and token in generated fragments.
+const ENSUREMATH_NOISE_LOOKBACK = 24;
+const ENSUREMATH_PREFIX_LOOKBACK = ENSUREMATH_PREFIX_LENGTH + ENSUREMATH_NOISE_LOOKBACK;
 
 const wrapBareImplicationCommandsOutsideMath = (value: string) =>
-  String(value || '').replace(/\\(?:Rightarrow|leftrightarrow|to)(?![A-Za-z])/g, (match, offset, source) => {
+  String(value || '').replace(/\\(?:Rightarrow|leftrightarrow|to)\b/g, (match, offset, source) => {
     if (source.slice(Math.max(0, offset - ENSUREMATH_PREFIX_LOOKBACK), offset).endsWith('\\ensuremath{')) return match;
     if (isInsideMathAt(source, offset)) return match;
     return `\\ensuremath{${match}}`;
