@@ -148,11 +148,13 @@ const normalizeGreekWordTokens = (value: string) =>
 const ENSUREMATH_PREFIX_LENGTH = '\\ensuremath{'.length;
 // Allow for minor spacing/noise between prefix and token in generated fragments
 // (e.g., whitespace/newlines and small formatting tokens inserted by cleanup steps).
+// 24 chars comfortably covers typical inserted whitespace/indentation noise.
 const ENSUREMATH_NOISE_LOOKBACK = 24;
 const ENSUREMATH_PREFIX_LOOKBACK = ENSUREMATH_PREFIX_LENGTH + ENSUREMATH_NOISE_LOOKBACK;
+const BARE_IMPLICATION_COMMAND_PATTERN = /\\(?:Rightarrow|leftrightarrow|to)(?![A-Za-z])/g;
 
 const wrapBareImplicationCommandsOutsideMath = (value: string) =>
-  String(value || '').replace(/\\Rightarrow\b|\\leftrightarrow\b|\\to(?![A-Za-z])/g, (match, offset, source) => {
+  String(value || '').replace(BARE_IMPLICATION_COMMAND_PATTERN, (match, offset, source) => {
     if (source.slice(Math.max(0, offset - ENSUREMATH_PREFIX_LOOKBACK), offset).endsWith('\\ensuremath{')) return match;
     if (isInsideMathAt(source, offset)) return match;
     return `\\ensuremath{${match}}`;
