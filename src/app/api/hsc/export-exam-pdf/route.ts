@@ -145,6 +145,15 @@ const normalizeGreekWordTokens = (value: string) =>
     .replace(/(?<!\\)\btheta\b/gi, '\\theta')
     .replace(/(?<!\\)\bpi\b/gi, '\\pi');
 
+const wrapBareImplicationCommandsOutsideMath = (value: string) =>
+  String(value || '').replace(/\\(?:Rightarrow|leftrightarrow|to)(?![A-Za-z])/g, (match, offset, source) => {
+    const index = Number(offset);
+    if (!Number.isFinite(index) || index < 0) return match;
+    if (source.slice(Math.max(0, index - 32), index).endsWith('\\ensuremath{')) return match;
+    if (isInsideMathAt(source, index)) return match;
+    return `\\ensuremath{${match}}`;
+  });
+
 /** Convert malformed \left\{ ... \right. piecewise blocks into a proper cases environment. */
 const normalizeMalformedPiecewiseBlocks = (value: string) =>
   String(value || '').replace(/\\left\\\{([\s\S]*?)\\right\./g, (_match, rawBody: string) => {
@@ -387,21 +396,22 @@ const escapeAmpersandsOutsideAlignment = (value: string) => {
 };
 
 const normalizeLatexBody = (value: string) =>
-  escapeAmpersandsOutsideAlignment(
-    wrapParenthesizedMathLikeSegments(
-      sanitizeMisplacedTableRules(
-        normalizeMalformedPiecewiseBlocks(
-        repairCasesRowSeparators(
-        repairTableRowSeparators(
-          repairMatrixRowSeparators(
-            convertPlainAmpersandTables(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+  wrapBareImplicationCommandsOutsideMath(
+    escapeAmpersandsOutsideAlignment(
+      wrapParenthesizedMathLikeSegments(
+        sanitizeMisplacedTableRules(
+          normalizeMalformedPiecewiseBlocks(
+          repairCasesRowSeparators(
+          repairTableRowSeparators(
+            repairMatrixRowSeparators(
+              convertPlainAmpersandTables(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+            )
+          )
+          )
           )
         )
-        )
-        )
-      )
-      .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
-      .replace(/\\begin\{table\}[\s\S]*?\\end\{table\}/gi, (match) => {
+        .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
+        .replace(/\\begin\{table\}[\s\S]*?\\end\{table\}/gi, (match) => {
         // Extract the tabular environment from within the table float
         const tabularMatch = match.match(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/i);
         if (tabularMatch) {
@@ -441,10 +451,6 @@ const normalizeLatexBody = (value: string) =>
       .replace(/⇒/g, '\\ensuremath{\\Rightarrow}')
       .replace(/→/g, '\\ensuremath{\\to}')
       .replace(/↔/g, '\\ensuremath{\\leftrightarrow}')
-      // Protect bare implication commands that appear in prose (outside math mode).
-      .replace(/(?<!\\ensuremath\{)\\Rightarrow\b/g, '\\ensuremath{\\Rightarrow}')
-      .replace(/(?<!\\ensuremath\{)\\leftrightarrow\b/g, '\\ensuremath{\\leftrightarrow}')
-      .replace(/(?<!\\ensuremath\{)\\to\b/g, '\\ensuremath{\\to}')
       .replace(/×/g, '\\ensuremath{\\times}')
       .replace(/÷/g, '\\ensuremath{\\div}')
       .replace(/π/g, '\\ensuremath{\\pi}')
@@ -461,8 +467,9 @@ const normalizeLatexBody = (value: string) =>
       .replace(/Δ/g, '\\ensuremath{\\Delta}')
       .replace(/Σ/g, '\\ensuremath{\\Sigma}')
       .replace(/Ω/g, '\\ensuremath{\\Omega}')
-      .replace(/√/g, '\\ensuremath{\\sqrt{}}')
-      .trim()
+        .replace(/√/g, '\\ensuremath{\\sqrt{}}')
+        .trim()
+      )
     )
   );
 
