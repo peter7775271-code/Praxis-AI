@@ -168,6 +168,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     grade: string;
     year: number;
     subject: string;
+    difficulty?: 'Foundation' | 'Intermediate' | 'Advanced' | 'Extension' | null;
     paper_number?: number | null;
     group_id?: string | null;
     topic: string;
@@ -310,6 +311,15 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [pdfMessage, setPdfMessage] = useState<string>('');
   const [pdfChatGptResponse, setPdfChatGptResponse] = useState<string>('');
   const [pdfRawInputs, setPdfRawInputs] = useState<string>('');
+  const [pdfIngestV2File, setPdfIngestV2File] = useState<File | null>(null);
+  const [pdfIngestV2Status, setPdfIngestV2Status] = useState<'idle' | 'uploading' | 'ready' | 'error'>('idle');
+  const [pdfIngestV2Message, setPdfIngestV2Message] = useState<string>('');
+  const [pdfIngestV2Response, setPdfIngestV2Response] = useState<string>('');
+  const [pdfOcrPreviewStatus, setPdfOcrPreviewStatus] = useState<'idle' | 'uploading' | 'ready' | 'error'>('idle');
+  const [pdfOcrPreviewMessage, setPdfOcrPreviewMessage] = useState<string>('');
+  const [pdfOcrPreviewResponse, setPdfOcrPreviewResponse] = useState<string>('');
+  const [pdfIngestV2GroupingMode, setPdfIngestV2GroupingMode] = useState<'main_question' | 'letter_subpart'>('main_question');
+  const [pdfIngestV2ClassifyAfterUpload, setPdfIngestV2ClassifyAfterUpload] = useState(true);
   const [pdfGrade, setPdfGrade] = useState<'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12'>('Year 12');
   const [pdfYear, setPdfYear] = useState<string>(new Date().getFullYear().toString());
   const [pdfSubject, setPdfSubject] = useState<string>('Mathematics Advanced');
@@ -2962,6 +2972,139 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   };
 
+  const submitPdfIngestV2 = async () => {
+    if (!pdfIngestV2File) {
+      setPdfIngestV2Status('error');
+      setPdfIngestV2Message('Please select a PDF file first.');
+      return;
+    }
+
+    const yearToSend = (pdfYearRef.current ?? pdfYear) || '';
+
+    if (!yearToSend || !pdfSubject || !pdfGrade || !pdfSchoolName.trim()) {
+      setPdfIngestV2Status('error');
+      setPdfIngestV2Message('Please provide grade, year, subject, and school.');
+      return;
+    }
+
+    const payload = new FormData();
+    payload.append('pdf', pdfIngestV2File);
+    payload.append('grade', pdfGrade);
+    payload.append('year', yearToSend);
+    payload.append('subject', pdfSubject);
+    payload.append('school', pdfSchoolName.trim());
+    payload.append('overwrite', pdfOverwrite ? 'true' : 'false');
+    payload.append('groupingMode', pdfIngestV2GroupingMode);
+    payload.append('classifyAfterUpload', pdfIngestV2ClassifyAfterUpload ? 'true' : 'false');
+
+    try {
+      setPdfIngestV2Status('uploading');
+      setPdfIngestV2Message('Running MathPix and ingest pipeline...');
+      setPdfIngestV2Response('');
+
+      const response = await fetch('/api/hsc/pdf-ingest-v2', {
+        method: 'POST',
+        body: payload,
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const details = String(data?.details || '').trim();
+        const baseError = String(data?.error || '').trim();
+        const code = String(data?.code || '').trim();
+        const stage = String(data?.stage || '').trim();
+        const hint = String(data?.hint || '').trim();
+
+        const lines = [
+          details || baseError || `Ingest failed (${response.status})`,
+          code ? `Code: ${code}` : '',
+          stage ? `Stage: ${stage}` : '',
+          hint ? `Hint: ${hint}` : '',
+        ].filter(Boolean);
+
+        setPdfIngestV2Response(JSON.stringify(data, null, 2));
+        throw new Error(lines.join('\n'));
+      }
+
+      setPdfIngestV2Status('ready');
+      setPdfIngestV2Message(
+        `Inserted ${Number(data?.inserted || 0)} question(s); failed ${Number(data?.failed || 0)}.`
+      );
+      setPdfIngestV2Response(JSON.stringify(data, null, 2));
+      fetchAllQuestions({ includeIncomplete: true });
+    } catch (error) {
+      setPdfIngestV2Status('error');
+      const message = error instanceof Error ? error.message : 'Failed to run pdf-ingest-v2';
+      setPdfIngestV2Message(message);
+      setPdfIngestV2Response((prev) => prev || JSON.stringify({ error: message }, null, 2));
+    }
+  };
+
+  const submitPdfMathpixOcrPreview = async () => {
+    if (!pdfIngestV2File) {
+      setPdfOcrPreviewStatus('error');
+      setPdfOcrPreviewMessage('Please select a PDF file first.');
+      return;
+    }
+
+    const payload = new FormData();
+    payload.append('pdf', pdfIngestV2File);
+    payload.append('grade', pdfGrade);
+    payload.append('year', (pdfYearRef.current ?? pdfYear) || '');
+    payload.append('subject', pdfSubject);
+    payload.append('school', pdfSchoolName.trim() || 'OCR Preview');
+    payload.append('groupingMode', pdfIngestV2GroupingMode);
+    payload.append('maxQuestions', '200');
+    payload.append('dryRun', 'true');
+
+    try {
+      setPdfOcrPreviewStatus('uploading');
+      setPdfOcrPreviewMessage('Running Mathpix OCR preview (no DB writes)...');
+      setPdfOcrPreviewResponse('');
+
+      const response = await fetch('/api/hsc/pdf-ingest-v2', {
+        method: 'POST',
+        body: payload,
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const details = String(data?.details || '').trim();
+        const baseError = String(data?.error || '').trim();
+        const code = String(data?.code || '').trim();
+        const stage = String(data?.stage || '').trim();
+        const hint = String(data?.hint || '').trim();
+
+        const lines = [
+          details || baseError || `OCR preview failed (${response.status})`,
+          code ? `Code: ${code}` : '',
+          stage ? `Stage: ${stage}` : '',
+          hint ? `Hint: ${hint}` : '',
+        ].filter(Boolean);
+
+        setPdfOcrPreviewResponse(JSON.stringify(data, null, 2));
+        throw new Error(lines.join('\n'));
+      }
+
+      const pageCount = Number(data?.source?.pageCount || 0);
+      const questionCount = Number(data?.previewQuestions?.length || 0);
+      const diagramLines = Number(data?.source?.totalDiagramLikeLines || 0);
+      const imageCount = Number(data?.source?.imageCount || 0);
+      const pageLabel = pageCount > 0 ? `${pageCount} page(s)` : `${imageCount} extracted image file(s)`;
+
+      setPdfOcrPreviewStatus('ready');
+      setPdfOcrPreviewMessage(
+        `Preview ready: ${pageLabel}, ${questionCount} preview question chunk(s), ${diagramLines} diagram-like line(s) detected.`
+      );
+      setPdfOcrPreviewResponse(JSON.stringify(data, null, 2));
+    } catch (error) {
+      setPdfOcrPreviewStatus('error');
+      const message = error instanceof Error ? error.message : 'Failed to run OCR preview';
+      setPdfOcrPreviewMessage(message);
+      setPdfOcrPreviewResponse((prev) => prev || JSON.stringify({ error: message }, null, 2));
+    }
+  };
+
   const extractMarksAwarded = (evaluation: string, maxMarks: number) => {
     if (!evaluation || typeof evaluation !== 'string') return null;
     const trimmed = evaluation.trim();
@@ -5229,6 +5372,15 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                   pdfMessage={pdfMessage}
                   pdfChatGptResponse={pdfChatGptResponse}
                   pdfRawInputs={pdfRawInputs}
+                  pdfIngestV2File={pdfIngestV2File}
+                  pdfIngestV2Status={pdfIngestV2Status}
+                  pdfIngestV2Message={pdfIngestV2Message}
+                  pdfIngestV2Response={pdfIngestV2Response}
+                  pdfOcrPreviewStatus={pdfOcrPreviewStatus}
+                  pdfOcrPreviewMessage={pdfOcrPreviewMessage}
+                  pdfOcrPreviewResponse={pdfOcrPreviewResponse}
+                  pdfIngestV2GroupingMode={pdfIngestV2GroupingMode}
+                  pdfIngestV2ClassifyAfterUpload={pdfIngestV2ClassifyAfterUpload}
                   pdfGrade={pdfGrade}
                   pdfYear={pdfYear}
                   pdfSubject={pdfSubject}
@@ -5277,6 +5429,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                   setExamPdfFile={setExamPdfFile}
                   setCriteriaPdfFile={setCriteriaPdfFile}
                   setExamImageFiles={setExamImageFiles}
+                  setPdfIngestV2File={setPdfIngestV2File}
+                  setPdfIngestV2GroupingMode={setPdfIngestV2GroupingMode}
+                  setPdfIngestV2ClassifyAfterUpload={setPdfIngestV2ClassifyAfterUpload}
                   setPdfGrade={setPdfGrade}
                   setPdfYear={setPdfYear}
                   setPdfSubject={setPdfSubject}
@@ -5300,6 +5455,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                   runSyllabusDotPointMapping={runSyllabusDotPointMapping}
                   runSyllabusImport={runSyllabusImport}
                   submitPdfPair={submitPdfPair}
+                  submitPdfIngestV2={submitPdfIngestV2}
+                  submitPdfMathpixOcrPreview={submitPdfMathpixOcrPreview}
                 />
               )}
 

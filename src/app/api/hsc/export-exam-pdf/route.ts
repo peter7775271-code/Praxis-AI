@@ -60,18 +60,34 @@ const escapeLatexText = (value: string) =>
 const stripInvalidControlChars = (value: string) =>
   String(value || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
 
+const decodeEscapedNewlineTokens = (value: string) =>
+  String(value || '')
+    // Convert explicit double-escaped sequences first (\\n -> newline).
+    .replace(/\\\\n/g, '\n')
+    // Convert single escaped newline tokens only when they are not LaTeX commands.
+    // This avoids corrupting commands like \neq or \noindent.
+    .replace(/\\n(?![a-z])/g, '\n')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\r(?![a-z])/g, '\n');
+
 const normalizeEscapedLatexArtifacts = (value: string) =>
-  value
+  decodeEscapedNewlineTokens(value)
+    // OCR/model output sometimes emits \[4pt] as a line break. In LaTeX this is
+    // a display-math opener; line breaks require \\[...]. Repair only length-like payloads.
+    .replace(/(?<!\\)\\\[\s*(-?[0-9]+(?:\.[0-9]+)?\s*(?:pt|mm|cm|in|ex|em|bp|pc|dd|cc|sp))\s*\]/gi, (_match, length) => `\\\\[${String(length).trim()}]`)
     // Recover JSON-escaped inline math delimiters that arrive as \\( and \\).
     .replace(/\\\\\(/g, '\\(')
     .replace(/\\\\\)/g, '\\)')
     // Recover commands that were escaped as \{}command in degraded output paths.
     .replace(/\\\{\}\s*([A-Za-z]+)/g, '\\$1')
     .replace(/\\\{\}\s*([!,:;])/g, '\\$1')
-    // Repair malformed \left/\right tokens missing required delimiters.
-    // Example: "\\left ..." or "\\right" before "\\]" -> use an invisible delimiter.
-    .replace(/\\left(?=\s*(?:\\[\[\](){}]|\\begin\{|$))/g, '\\left.')
-    .replace(/\\right(?=\s*(?:\\[\[\](){}]|\\end\{|$))/g, '\\right.')
+    // Normalize uncommon Arg commands to a compile-safe operator form.
+    .replace(/\\Arg\b/g, '\\operatorname{Arg}')
+    .replace(/\\arg\b/g, '\\operatorname{arg}')
+    // Repair malformed \left/\right tokens only when the delimiter is truly missing.
+    // Do not touch valid delimiters like \left\{, \left(, \right\}, etc.
+    .replace(/\\left(?=\s*(?:\\\]|\\\)|\\end\{|$))/g, '\\left.')
+    .replace(/\\right(?=\s*(?:\\\]|\\\)|\\end\{|$))/g, '\\right.')
     .replace(/\\dfrac/g, '\\frac')
     // Repair fused command pairs from OCR/model output, e.g. \pidisplaystyle -> \pi\displaystyle.
     .replace(/\\(pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega)(displaystyle|textstyle)\b/g, '\\$1\\$2')
@@ -105,6 +121,7 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
         'parallel', 'perp', 'therefore', 'because',
         'in', 'notin', 'subset', 'supset', 'subseteq', 'supseteq',
         'cup', 'cap', 'exists', 'forall', 'implies', 'iff', 'neg', 'land', 'lor',
+        'multirow', 'multicolumn',
       ]);
       // If the full token is a known command, don't split
       if (KNOWN_COMMANDS.has(letters)) return _match;
@@ -122,6 +139,61 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
     })
     // Drop stray backslashes that are not starting a command/escape and can crash pdflatex.
     .replace(/\\(?![A-Za-z]+|[%$&#_{}~^\\()\[\],;:! ])/g, '');
+
+const normalizeGreekWordTokens = (value: string) =>
+  String(value || '')
+    .replace(/(?<!\\)\btheta\b/gi, '\\theta')
+    .replace(/(?<!\\)\bpi\b/gi, '\\pi');
+
+/** Convert malformed \left\{ ... \right. piecewise blocks into a proper cases environment. */
+const normalizeMalformedPiecewiseBlocks = (value: string) =>
+  String(value || '').replace(/\\left\\\{([\s\S]*?)\\right\./g, (_match, rawBody: string) => {
+    const body = String(rawBody || '');
+    if (/\\begin\{(?:cases|dcases|rcases|drcases|array|aligned)\}/.test(body)) {
+      return _match;
+    }
+
+    const compact = body
+      // Common OCR breakage: split "2" and "theta" across two lines.
+      .replace(/([0-9])\s*\n\s*(\\?[A-Za-z])/g, '$1 $2')
+      .replace(/\n{3,}/g, '\n\n');
+
+    const sourceLines = compact
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (sourceLines.length < 2) return _match;
+
+    const mergedLines: string[] = [];
+    for (let index = 0; index < sourceLines.length; index += 1) {
+      const line = sourceLines[index];
+      if (/^[+-]?\d+(?:\.\d+)?$/.test(line) && index + 1 < sourceLines.length) {
+        sourceLines[index + 1] = `${line} ${sourceLines[index + 1]}`.trim();
+        continue;
+      }
+      mergedLines.push(line);
+    }
+
+    const rows: string[] = [];
+    for (const line of mergedLines) {
+      const cleaned = line.replace(/[.;]\s*$/, '').trim();
+      if (!cleaned) continue;
+
+      const split = cleaned.match(/^(.+?),\s*(.+)$/);
+      if (split) {
+        const expr = normalizeGreekWordTokens(split[1].trim());
+        const cond = normalizeGreekWordTokens(split[2].trim());
+        rows.push(`${expr} & ${cond} \\\\`);
+      } else {
+        rows.push(`${normalizeGreekWordTokens(cleaned)} \\\\`);
+      }
+    }
+
+    if (rows.length < 2) return _match;
+
+    return `\\begin{cases}\n${rows.join('\n')}\n\\end{cases}`;
+  });
 
 /** Inside matrix environments, repair single-backslash + letter that should be \\ (row separator). */
 const repairMatrixRowSeparators = (value: string) =>
@@ -318,6 +390,7 @@ const normalizeLatexBody = (value: string) =>
   escapeAmpersandsOutsideAlignment(
     wrapParenthesizedMathLikeSegments(
       sanitizeMisplacedTableRules(
+        normalizeMalformedPiecewiseBlocks(
         repairCasesRowSeparators(
         repairTableRowSeparators(
           repairMatrixRowSeparators(
@@ -325,8 +398,22 @@ const normalizeLatexBody = (value: string) =>
           )
         )
         )
+        )
       )
       .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
+      .replace(/\\begin\{table\}[\s\S]*?\\end\{table\}/gi, (match) => {
+        // Extract the tabular environment from within the table float
+        const tabularMatch = match.match(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/i);
+        if (tabularMatch) {
+          // Wrap the tabular in a center environment instead of the float
+          return `\\begin{center}\n${tabularMatch[0]}\n\\end{center}`;
+        }
+        // If no tabular found, just remove the table wrapper and keep its content
+        const contentWithoutWrappers = match
+          .replace(/\\begin\{table\}[\s\S]*?\{/, '')
+          .replace(/\}[\s\S]*?\\end\{table\}/, '');
+        return contentWithoutWrappers || '';
+      })
       .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/gi, '')
       .replace(/\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{[^}]+\}/gi, '')
       .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
@@ -338,9 +425,15 @@ const normalizeLatexBody = (value: string) =>
       .replace(/(?<!\\)%/g, '\\%')
       .replace(/\bMARKS_(\d+)\b/g, 'MARKS\\_$1')
       .replace(/\bQUESTION_(\d+)\b/g, 'QUESTION\\_$1')
-      .replace(/(^|\s)([0-9]*[A-Za-z]+)\^\(([^)]+)\)/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{(${powerExpr})}}`)
-      .replace(/(^|\s)([0-9]*[A-Za-z]+)\^([A-Za-z])(?![A-Za-z0-9{])/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
-      .replace(/(^|\s)([0-9]*[A-Za-z]+)\^([0-9]+)(?=\b)/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])([0-9]*[A-Za-z]+)\^\(([^)]+)\)/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{(${powerExpr})}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])([0-9]*[A-Za-z]+)\^([A-Za-z])(?![A-Za-z0-9{])/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])([0-9]*[A-Za-z]+)\^([-+]?[0-9]+)(?=\b)/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])(\|[^|\n]+\|)\^\(([^)]+)\)/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{(${powerExpr})}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])(\|[^|\n]+\|)\^([A-Za-z])(?![A-Za-z0-9{])/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])(\|[^|\n]+\|)\^([-+]?[0-9]+)(?=\b)/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])(\((?:[^()\n]|\([^()\n]*\))+\))\^\(([^)]+)\)/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{(${powerExpr})}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])(\((?:[^()\n]|\([^()\n]*\))+\))\^([A-Za-z])(?![A-Za-z0-9{])/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])(\((?:[^()\n]|\([^()\n]*\))+\))\^([-+]?[0-9]+)(?=\b)/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
       .replace(/∠/g, '\\ensuremath{\\angle}')
       .replace(/≤/g, '\\ensuremath{\\le}')
       .replace(/≥/g, '\\ensuremath{\\ge}')
@@ -386,6 +479,46 @@ const normalizePlainBody = (value: string) =>
     .replace(/\\dfrac/g, '\\frac')
     .replace(/\s+/g, ' ')
     .trim();
+
+const collapseInternalNewlines = (value: string) => {
+  // Replace internal newlines and extra whitespace with single spaces.
+  // This prevents embedded newlines from breaking LaTeX commands like \right.
+  return String(value || '')
+    .replace(/[\r\n]+/g, ' ')  // Replace newlines with spaces
+    .replace(/\s+/g, ' ')      // Collapse multiple spaces to single space
+    .trim();
+};
+
+const ensureMathModeForMcqOption = (value: string) => {
+  const collapsed = collapseInternalNewlines(value);
+  const trimmed = String(collapsed || '').trim();
+  if (!trimmed) return '';
+
+  // Leave values that already declare math/text environments untouched.
+  if (/^(?:\\\(|\\\[|\$\$?|\\begin\{)/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const hasStrongMathSignal =
+    /\\(?:frac|dfrac|sqrt|left|right|sum|int|prod|lim|sin|cos|tan|sec|cosec|cot|log|ln|exp|pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega|Delta|Sigma|Omega|cdot|times|div|leq|geq|neq|approx|to)\b/.test(trimmed) ||
+    /[_^=<>]/.test(trimmed);
+
+  if (!hasStrongMathSignal) {
+    return trimmed;
+  }
+
+  const longWordMatches = trimmed.match(/[A-Za-z]{3,}/g) || [];
+  const hasSentenceLikeWord = longWordMatches.some((word) => {
+    const normalized = word.toLowerCase();
+    return !['sin', 'cos', 'tan', 'sec', 'cot', 'log', 'ln', 'exp'].includes(normalized);
+  });
+
+  if (hasSentenceLikeWord) {
+    return trimmed;
+  }
+
+  return `\\(${trimmed}\\)`;
+};
 
 const imageWidthBySize = (size: string | null | undefined) => {
   if (size === 'small') return '0.38\\textwidth';
@@ -727,8 +860,10 @@ const finalizeCompileSafeBody = (value: string) =>
         unwrapInlineMathInsideDisplayMath(
         normalizeInlineDollarMath(
           balanceLatexBraces(
-            repairCasesRowSeparators(
-              repairTableRowSeparators(repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(value)))
+            normalizeMalformedPiecewiseBlocks(
+              repairCasesRowSeparators(
+                repairTableRowSeparators(repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(value)))
+              )
             )
           )
         )
@@ -739,6 +874,7 @@ const finalizeCompileSafeBody = (value: string) =>
 
 const SAFE_LATEX_COMMANDS = new Set([
   'frac', 'dfrac', 'sqrt', 'left', 'right', 'cdot', 'times', 'div',
+  'circ', 'triangle',
   'le', 'leq', 'ge', 'geq', 'ne', 'neq', 'pm', 'mp', 'infty',
   'sum', 'int', 'lim', 'log', 'ln', 'exp',
   'sin', 'cos', 'tan', 'sec', 'cosec', 'cot', 'operatorname',
@@ -749,6 +885,7 @@ const SAFE_LATEX_COMMANDS = new Set([
   'Delta', 'Sigma', 'Omega',
   'vec', 'overrightarrow', 'overleftarrow', 'overline', 'underline',
   'hat', 'bar', 'dot', 'ddot', 'tilde', 'widehat', 'widetilde',
+  'bigl', 'bigr', 'Bigl', 'Bigr', 'biggl', 'biggr', 'Biggl', 'Biggr',
   'overbrace', 'underbrace', 'mathbb', 'mathcal',
   'text', 'textbf', 'mathrm', 'mathit', 'mathbf', 'ensuremath',
   'quad', 'qquad', 'dots', 'ldots', 'cdots',
@@ -757,6 +894,7 @@ const SAFE_LATEX_COMMANDS = new Set([
   'begin', 'end', 'item', 'itemsep', 'centering', 'hline',
   'section', 'subsection', 'subsubsection',
   'includegraphics', 'url', 'href', 'label', 'ref',
+  'multirow', 'multicolumn',
 ]);
 
 const neutralizeUnknownLatexCommands = (value: string) =>
@@ -1086,22 +1224,22 @@ const buildExamLatex = ({
       const options: Array<{ label: 'A' | 'B' | 'C' | 'D'; value: string; imageFile?: string | null }> = [
         {
           label: 'A',
-          value: renderBody(String(question.mcq_option_a || '').trim()),
+          value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_a || '').trim())),
           imageFile: question.mcq_option_a_image_file,
         },
         {
           label: 'B',
-          value: renderBody(String(question.mcq_option_b || '').trim()),
+          value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_b || '').trim())),
           imageFile: question.mcq_option_b_image_file,
         },
         {
           label: 'C',
-          value: renderBody(String(question.mcq_option_c || '').trim()),
+          value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_c || '').trim())),
           imageFile: question.mcq_option_c_image_file,
         },
         {
           label: 'D',
-          value: renderBody(String(question.mcq_option_d || '').trim()),
+          value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_d || '').trim())),
           imageFile: question.mcq_option_d_image_file,
         },
       ];
@@ -1261,6 +1399,7 @@ const buildExamLatex = ({
 \\usepackage{amsmath,amssymb,mathtools}
 \\usepackage[final]{graphicx}
 \\usepackage{enumitem}
+\\usepackage{multirow}
 \\usepackage{xcolor}
 \\usepackage[strings]{underscore}
 \\setkeys{Gin}{draft=false}

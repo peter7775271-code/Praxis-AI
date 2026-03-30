@@ -6,6 +6,7 @@ const isMissingColumnError = (message: string) => {
 
 const HSC_QUESTION_COLUMNS = [
   'id', 'grade', 'year', 'subject', 'school_name', 'paper_number', 'paper_label',
+  'difficulty',
   'topic', 'subtopic', 'syllabus_dot_point', 'marks', 'question_number',
   'question_text', 'question_type', 'graph_image_data', 'graph_image_size',
   'marking_criteria', 'sample_answer', 'sample_answer_image', 'sample_answer_image_size',

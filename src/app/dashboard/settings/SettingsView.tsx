@@ -13,7 +13,10 @@ interface Props {
 
 export default function SettingsView({
   question, error, examPdfFile, examImageFiles, pdfStatus, pdfMessage, pdfChatGptResponse,
-  pdfRawInputs, pdfGrade, pdfYear, pdfSubject, pdfOverwrite, pdfGenerateCriteria,
+  pdfRawInputs, pdfIngestV2File, pdfIngestV2Status, pdfIngestV2Message, pdfIngestV2Response,
+  pdfOcrPreviewStatus, pdfOcrPreviewMessage, pdfOcrPreviewResponse,
+  pdfIngestV2GroupingMode, pdfIngestV2ClassifyAfterUpload,
+  pdfGrade, pdfYear, pdfSubject, pdfOverwrite, pdfGenerateCriteria,
   pdfAutoGroupSubparts, pdfSchoolName, pdfPaperNumber, selectedSyllabusMappingPaper,
   isMappingSyllabusDotPoints, syllabusMappingResult, syllabusMappingStatus,
   syllabusMappingProgress, syllabusMappingDebugOutputs, syllabusWorkflowTestInput,
@@ -29,18 +32,21 @@ export default function SettingsView({
   userStripeCancelAt,
   userStripeCancelAtPeriodEnd,
   onSaveDefaultPreset,
-  setExamPdfFile, setCriteriaPdfFile, setExamImageFiles, setPdfGrade, setPdfYear, setPdfSubject,
+  setExamPdfFile, setCriteriaPdfFile, setExamImageFiles, setPdfIngestV2File,
+  setPdfIngestV2GroupingMode, setPdfIngestV2ClassifyAfterUpload,
+  setPdfGrade, setPdfYear, setPdfSubject,
   setPdfOverwrite, setPdfGenerateCriteria, setPdfAutoGroupSubparts, setPdfSchoolName, setPdfPaperNumber,
   setSelectedSyllabusMappingPaper, setSyllabusWorkflowTestInput, setSyllabusImportText,
   setSyllabusImportSubject, setSyllabusImportGrade, setViewMode, setUserNameDraft,
   pdfYearRef, fetchAllQuestions, availablePapers,
   handleSaveName, runSyllabusWorkflowTest, runSyllabusDotPointMapping, runSyllabusImport,
-  submitPdfPair,
+  submitPdfPair, submitPdfIngestV2, submitPdfMathpixOcrPreview,
   showDeveloperTools = false,
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [unspecifiedTopicLimit, setUnspecifiedTopicLimit] = React.useState(10);
+  const [selectedUnspecifiedTopicPapers, setSelectedUnspecifiedTopicPapers] = React.useState<string[]>([]);
   const [isClassifyingUnspecifiedTopics, setIsClassifyingUnspecifiedTopics] = React.useState(false);
   const [unspecifiedTopicStatus, setUnspecifiedTopicStatus] = React.useState<'idle' | 'success' | 'error'>('idle');
   const [unspecifiedTopicResult, setUnspecifiedTopicResult] = React.useState('');
@@ -155,18 +161,33 @@ export default function SettingsView({
     };
   }, []);
 
+  React.useEffect(() => {
+    const validPaperKeys = new Set(availablePapers.map((paper: any) => getPaperKey(paper)));
+    setSelectedUnspecifiedTopicPapers((prev) => {
+      const filtered = prev.filter((key) => validPaperKeys.has(key));
+      if (filtered.length > 0) return filtered;
+      if (selectedSyllabusMappingPaper && validPaperKeys.has(selectedSyllabusMappingPaper)) {
+        return [selectedSyllabusMappingPaper];
+      }
+      return [];
+    });
+  }, [availablePapers, selectedSyllabusMappingPaper]);
+
   const runUnspecifiedTopicClassification = async () => {
-    if (!selectedSyllabusMappingPaper) {
+    if (selectedUnspecifiedTopicPapers.length === 0) {
       setUnspecifiedTopicStatus('error');
-      setUnspecifiedTopicResult('Select an exam first.');
+      setUnspecifiedTopicResult('Select at least one exam first.');
       setUnspecifiedTopicOutputs([]);
       return;
     }
 
-    const selectedPaper = availablePapers.find((paper: any) => getPaperKey(paper) === selectedSyllabusMappingPaper);
-    if (!selectedPaper) {
+    const selectedPapers = selectedUnspecifiedTopicPapers
+      .map((paperKey) => availablePapers.find((paper: any) => getPaperKey(paper) === paperKey))
+      .filter(Boolean);
+
+    if (!selectedPapers.length) {
       setUnspecifiedTopicStatus('error');
-      setUnspecifiedTopicResult('Selected exam is no longer available.');
+      setUnspecifiedTopicResult('Selected exams are no longer available.');
       setUnspecifiedTopicOutputs([]);
       return;
     }
@@ -185,10 +206,12 @@ export default function SettingsView({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          grade: selectedPaper.grade,
-          year: selectedPaper.year,
-          subject: selectedPaper.subject,
-          school: selectedPaper.school,
+          exams: selectedPapers.map((paper: any) => ({
+            grade: paper.grade,
+            year: paper.year,
+            subject: paper.subject,
+            school: paper.school,
+          })),
           limit,
         }),
       });
@@ -202,14 +225,24 @@ export default function SettingsView({
       }
 
       const totals = data?.totals || {};
-      const debugCounts = data?.debugCounts || {};
+      const perExam = Array.isArray(data?.perExam) ? data.perExam : [];
+      const zeroExamDebugSummary = perExam
+        .slice(0, 3)
+        .map((entry: any) => {
+          const exam = entry?.exam || {};
+          const debug = entry?.debugCounts || {};
+          return `${exam.year || '?'} ${exam.grade || ''} ${exam.subject || ''} ${exam.school || ''} [year: ${debug.allQuestionsByYear || 0}, context: ${debug.matchedPaperContext || 0}]`.trim();
+        })
+        .join(' | ');
       const debugSuffix =
         Number(totals.processed || 0) === 0
-          ? ` (year matches: ${debugCounts.allQuestionsByYear || 0}, paper-context matches: ${debugCounts.matchedPaperContext || 0})`
+          ? zeroExamDebugSummary
+            ? ` (${zeroExamDebugSummary})`
+            : ''
           : '';
       setUnspecifiedTopicStatus('success');
       setUnspecifiedTopicResult(
-        `Processed ${totals.processed || 0} of ${totals.foundUnspecified || 0} unspecified questions. Updated ${totals.updated || 0}, failed ${totals.failed || 0}.${debugSuffix}`
+        `Processed ${totals.processed || 0} of ${totals.foundUnspecified || 0} unspecified questions across ${totals.examsSelected || selectedPapers.length} exam(s). Updated ${totals.updated || 0}, failed ${totals.failed || 0}.${debugSuffix}`
       );
       setUnspecifiedTopicOutputs(Array.isArray(data?.outputs) ? data.outputs : []);
       fetchAllQuestions({ includeIncomplete: true });
@@ -1281,6 +1314,271 @@ export default function SettingsView({
                             borderColor: 'var(--clr-surface-tonal-a20)',
                           }}
                         >
+                          <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--clr-primary-a50)' }}>PDF Ingest v2 (MathPix)</h2>
+                          <p className="text-sm mb-4" style={{ color: 'var(--clr-surface-a40)' }}>
+                            Dev-only route: uploads one past-paper PDF, runs MathPix conversion, cleans each question via OpenAI, and inserts to the bank.
+                          </p>
+
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                              <div>
+                                <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Grade</label>
+                                <select
+                                  value={pdfGrade}
+                                  onChange={(e) => {
+                                    const nextGrade = e.target.value as 'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12';
+                                    const nextSubjects = SUBJECTS_BY_YEAR[nextGrade];
+                                    setPdfGrade(nextGrade);
+                                    if (!nextSubjects.includes(pdfSubject)) {
+                                      setPdfSubject(nextSubjects[0]);
+                                    }
+                                  }}
+                                  className="mt-2 w-full px-4 py-2 rounded-lg border"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                >
+                                  <option value="Year 7">Year 7</option>
+                                  <option value="Year 8">Year 8</option>
+                                  <option value="Year 9">Year 9</option>
+                                  <option value="Year 10">Year 10</option>
+                                  <option value="Year 11">Year 11</option>
+                                  <option value="Year 12">Year 12</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Exam Year</label>
+                                <select
+                                  id="pdf-ingest-v2-year"
+                                  value={pdfYear}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    pdfYearRef.current = v;
+                                    setPdfYear(v);
+                                  }}
+                                  className="mt-2 w-full px-4 py-2 rounded-lg border"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                >
+                                  {YEARS.map((year) => (
+                                    <option key={year} value={year}>{year}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Subject</label>
+                                <select
+                                  value={pdfSubject}
+                                  onChange={(e) => setPdfSubject(e.target.value)}
+                                  className="mt-2 w-full px-4 py-2 rounded-lg border"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                >
+                                  {SUBJECTS_BY_YEAR[pdfGrade].map((subject) => (
+                                    <option key={subject} value={subject}>{subject}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>School</label>
+                                <input
+                                  type="text"
+                                  value={pdfSchoolName}
+                                  onChange={(e) => setPdfSchoolName(e.target.value)}
+                                  placeholder="e.g., Riverside High School"
+                                  className="mt-2 w-full px-4 py-2 rounded-lg border"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Past Paper PDF</label>
+                              <input
+                                type="file"
+                                accept="application/pdf"
+                                onChange={(e) => setPdfIngestV2File(e.target.files?.[0] || null)}
+                                className="mt-2 w-full px-4 py-2 rounded-lg border"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                  color: 'var(--clr-primary-a50)',
+                                }}
+                              />
+                              {pdfIngestV2File && (
+                                <p className="mt-2 text-xs" style={{ color: 'var(--clr-surface-a50)' }}>
+                                  Selected: {pdfIngestV2File.name}
+                                </p>
+                              )}
+                            </div>
+
+                            <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--clr-surface-a50)' }}>
+                              <input
+                                type="checkbox"
+                                checked={pdfOverwrite}
+                                onChange={(e) => setPdfOverwrite(e.target.checked)}
+                              />
+                              Overwrite existing rows for this grade/year/subject/school
+                            </label>
+
+                            <div>
+                              <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Question Grouping Mode</label>
+                              <select
+                                value={pdfIngestV2GroupingMode}
+                                onChange={(e) => setPdfIngestV2GroupingMode(e.target.value as 'main_question' | 'letter_subpart')}
+                                className="mt-2 w-full px-4 py-2 rounded-lg border"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                  color: 'var(--clr-primary-a50)',
+                                }}
+                              >
+                                <option value="main_question">Send 11(a), 11(b), 11(c) together</option>
+                                <option value="letter_subpart">Send 11(a)(i), 11(a)(ii) together</option>
+                              </select>
+                            </div>
+
+                            <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--clr-surface-a50)' }}>
+                              <input
+                                type="checkbox"
+                                checked={pdfIngestV2ClassifyAfterUpload}
+                                onChange={(e) => setPdfIngestV2ClassifyAfterUpload(e.target.checked)}
+                              />
+                              Classify topic/subtopic automatically after DB insert
+                            </label>
+
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={submitPdfIngestV2}
+                                disabled={pdfIngestV2Status === 'uploading'}
+                                className="px-4 py-2 rounded-lg font-medium cursor-pointer disabled:opacity-50"
+                                style={{
+                                  backgroundColor: 'var(--clr-primary-a0)',
+                                  color: 'var(--clr-dark-a0)',
+                                }}
+                              >
+                                {pdfIngestV2Status === 'uploading' ? 'Sending...' : 'Send'}
+                              </button>
+                              {pdfIngestV2Message && (
+                                <span
+                                  className="text-sm"
+                                  style={{
+                                    whiteSpace: 'pre-line',
+                                    color:
+                                      pdfIngestV2Status === 'error'
+                                        ? 'var(--clr-danger-a10)'
+                                        : pdfIngestV2Status === 'ready'
+                                          ? 'var(--clr-success-a10)'
+                                          : 'var(--clr-surface-a50)',
+                                  }}
+                                >
+                                  {pdfIngestV2Message}
+                                </span>
+                              )}
+                            </div>
+
+                            {pdfIngestV2Response && (
+                              <div>
+                                <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Ingest Response</label>
+                                <textarea
+                                  readOnly
+                                  value={pdfIngestV2Response}
+                                  rows={12}
+                                  className="mt-2 w-full px-4 py-2 rounded-lg border font-mono text-xs"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                />
+                              </div>
+                            )}
+
+                            <div
+                              className="p-4 rounded-xl border"
+                              style={{
+                                backgroundColor: 'var(--clr-surface-a0)',
+                                borderColor: 'var(--clr-surface-tonal-a20)',
+                              }}
+                            >
+                              <h3 className="text-base font-semibold mb-1" style={{ color: 'var(--clr-primary-a50)' }}>
+                                Mathpix OCR Preview (No DB Insert)
+                              </h3>
+                              <p className="text-xs mb-3" style={{ color: 'var(--clr-surface-a40)' }}>
+                                Runs PDF → page images → Mathpix OCR only. Use this to inspect raw OCR LaTeX and diagram/graph-like detection stats before ingesting.
+                              </p>
+
+                              <div className="flex items-center gap-3">
+                                <button
+                                  onClick={submitPdfMathpixOcrPreview}
+                                  disabled={pdfOcrPreviewStatus === 'uploading'}
+                                  className="px-4 py-2 rounded-lg font-medium cursor-pointer disabled:opacity-50"
+                                  style={{
+                                    backgroundColor: 'var(--clr-primary-a0)',
+                                    color: 'var(--clr-dark-a0)',
+                                  }}
+                                >
+                                  {pdfOcrPreviewStatus === 'uploading' ? 'Testing OCR...' : 'Test OCR Conversion'}
+                                </button>
+                                {pdfOcrPreviewMessage && (
+                                  <span
+                                    className="text-sm"
+                                    style={{
+                                      whiteSpace: 'pre-line',
+                                      color:
+                                        pdfOcrPreviewStatus === 'error'
+                                          ? 'var(--clr-danger-a10)'
+                                          : pdfOcrPreviewStatus === 'ready'
+                                            ? 'var(--clr-success-a10)'
+                                            : 'var(--clr-surface-a50)',
+                                    }}
+                                  >
+                                    {pdfOcrPreviewMessage}
+                                  </span>
+                                )}
+                              </div>
+
+                              {pdfOcrPreviewResponse && (
+                                <div className="mt-3">
+                                  <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>
+                                    OCR Preview Response
+                                  </label>
+                                  <textarea
+                                    readOnly
+                                    value={pdfOcrPreviewResponse}
+                                    rows={14}
+                                    className="mt-2 w-full px-4 py-2 rounded-lg border font-mono text-xs"
+                                    style={{
+                                      backgroundColor: 'var(--clr-surface-a0)',
+                                      borderColor: 'var(--clr-surface-tonal-a20)',
+                                      color: 'var(--clr-primary-a50)',
+                                    }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
+                          className="p-6 rounded-2xl border mt-6"
+                          style={{
+                            backgroundColor: 'var(--clr-surface-a10)',
+                            borderColor: 'var(--clr-surface-tonal-a20)',
+                          }}
+                        >
                           <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--clr-primary-a50)' }}>Subscription Testing (Dev)</h2>
                           <p className="text-sm mb-4" style={{ color: 'var(--clr-surface-a40)' }}>
                             Use the <code>/api/dev/set-plan</code> endpoint from the browser console to change your plan for testing:
@@ -1596,13 +1894,66 @@ await fetch('/api/dev/set-plan', {
                             Unspecified Topic Classifier
                           </h2>
                           <p className="text-sm mb-4" style={{ color: 'var(--clr-surface-a40)' }}>
-                            Developer-only: send question text and question image (if present) to GPT, constrained to taxonomy topics/subtopics for this paper context.
+                            Developer-only: classify only topic, subtopic, and difficulty for questions currently set to Unspecified.
                           </p>
 
                           <div className="space-y-4">
                             <div>
+                              <div className="flex items-center justify-between gap-3">
+                                <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>
+                                  Exams to classify
+                                </label>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedUnspecifiedTopicPapers(availablePapers.map((paper: any) => getPaperKey(paper)))}
+                                    disabled={isClassifyingUnspecifiedTopics || availablePapers.length === 0}
+                                    className="px-3 py-1 rounded-md text-xs font-medium cursor-pointer disabled:opacity-50"
+                                    style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-primary-a50)' }}
+                                  >
+                                    Select all
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedUnspecifiedTopicPapers([])}
+                                    disabled={isClassifyingUnspecifiedTopics || selectedUnspecifiedTopicPapers.length === 0}
+                                    className="px-3 py-1 rounded-md text-xs font-medium cursor-pointer disabled:opacity-50"
+                                    style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-primary-a50)' }}
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                              </div>
+                              <select
+                                multiple
+                                value={selectedUnspecifiedTopicPapers}
+                                onChange={(e) => {
+                                  const values = Array.from(e.target.selectedOptions).map((option) => option.value);
+                                  setSelectedUnspecifiedTopicPapers(values);
+                                }}
+                                disabled={isClassifyingUnspecifiedTopics || availablePapers.length === 0}
+                                className="mt-2 w-full px-3 py-2 rounded-lg border text-sm"
+                                style={{
+                                  backgroundColor: 'var(--clr-surface-a0)',
+                                  borderColor: 'var(--clr-surface-tonal-a20)',
+                                  color: 'var(--clr-primary-a50)',
+                                  minHeight: '132px',
+                                }}
+                              >
+                                {availablePapers.map((paper: any) => (
+                                  <option key={getPaperKey(paper)} value={getPaperKey(paper)}>
+                                    {paper.year} • {paper.grade} • {paper.subject} • {paper.school} ({paper.count} questions)
+                                  </option>
+                                ))}
+                              </select>
+                              <p className="mt-2 text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
+                                Hold Ctrl/Cmd to select multiple exams.
+                              </p>
+                            </div>
+
+                            <div>
                               <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>
-                                Questions to process
+                                Questions to process per exam
                               </label>
                               <input
                                 type="number"
@@ -1623,21 +1974,21 @@ await fetch('/api/dev/set-plan', {
                                 }}
                               />
                               <p className="mt-2 text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
-                                Uses the selected exam above. Year 11/12 papers automatically include both Year 11 and Year 12 taxonomy topics/subtopics.
+                                Year 11/12 papers automatically include both Year 11 and Year 12 taxonomy topics/subtopics.
                               </p>
                             </div>
 
                             <div className="flex items-center gap-3">
                               <button
                                 onClick={runUnspecifiedTopicClassification}
-                                disabled={isClassifyingUnspecifiedTopics || availablePapers.length === 0 || !selectedSyllabusMappingPaper}
+                                disabled={isClassifyingUnspecifiedTopics || availablePapers.length === 0 || selectedUnspecifiedTopicPapers.length === 0}
                                 className="px-4 py-2 rounded-lg font-medium cursor-pointer disabled:opacity-50"
                                 style={{
                                   backgroundColor: 'var(--clr-primary-a0)',
                                   color: 'var(--clr-dark-a0)',
                                 }}
                               >
-                                {isClassifyingUnspecifiedTopics ? 'Classifying...' : 'Classify Unspecified Topics'}
+                                {isClassifyingUnspecifiedTopics ? 'Classifying...' : 'Classify Selected Exams'}
                               </button>
                               {unspecifiedTopicResult && (
                                 <span

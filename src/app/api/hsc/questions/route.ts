@@ -1,15 +1,26 @@
 import { supabaseAdmin } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 
-const isMissingColumnError = (message: string) => {
+const isMissingColumnError = (error: unknown) => {
+  const code = typeof error === 'object' && error && 'code' in error
+    ? String((error as { code?: unknown }).code || '')
+    : '';
+
+  if (code === '42703') return true;
+
+  const message = typeof error === 'object' && error && 'message' in error
+    ? String((error as { message?: unknown }).message || '')
+    : String(error || '');
+
   return /Could not find the '[^']+' column|column\s+"?[^"\s]+"?\s+does not exist/i.test(message);
 };
 
 const HSC_QUESTION_COLUMNS = [
   'id', 'grade', 'year', 'subject', 'school_name', 'paper_number', 'paper_label',
+  'difficulty',
   'topic', 'subtopic', 'syllabus_dot_point', 'marks', 'question_number',
   'question_text', 'question_type', 'graph_image_data', 'graph_image_size',
-  'marking_criteria', 'sample_answer', 'sample_answer_image', 'sample_answer_image_size',
+  'marking_criteria', 'sample_answer', 'sample_answer_image',
   'mcq_option_a', 'mcq_option_b', 'mcq_option_c', 'mcq_option_d',
   'mcq_option_a_image', 'mcq_option_b_image', 'mcq_option_c_image', 'mcq_option_d_image',
   'mcq_correct_answer', 'mcq_explanation', 'created_at',
@@ -43,7 +54,7 @@ export async function GET(request: NextRequest) {
       shouldExcludeIncomplete
     );
 
-    if (countError && shouldExcludeIncomplete && isMissingColumnError(String(countError.message || ''))) {
+    if (countError && shouldExcludeIncomplete && isMissingColumnError(countError)) {
       shouldExcludeIncomplete = false;
       const retryResult = await applyFilters(
         supabaseAdmin.from('hsc_questions').select('*', { count: 'exact', head: true }),
@@ -75,7 +86,7 @@ export async function GET(request: NextRequest) {
       shouldExcludeIncomplete
     ).range(randomOffset, randomOffset);
 
-    if (error && isMissingColumnError(String(error.message || ''))) {
+    if (error && isMissingColumnError(error)) {
       // Fall back to selecting all columns when an explicit column is missing from the schema
       const retryResult = await applyFilters(
         supabaseAdmin.from('hsc_questions').select('*'),

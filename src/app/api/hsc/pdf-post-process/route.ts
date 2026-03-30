@@ -126,12 +126,17 @@ const compareQuestionNumbers = (leftRaw: string | null, rightRaw: string | null)
 
 const parseRecoveredAnswer = (content: string) => {
   const lines = String(content || '').split(/\r?\n/);
-  let mode: 'answer' | 'criteria' | null = null;
+  let mode: 'question' | 'answer' | 'criteria' | null = null;
+  const questionLines: string[] = [];
   const answerLines: string[] = [];
   const criteriaLines: string[] = [];
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
+    if (line === 'QUESTION_CONTENT_CLEANED') {
+      mode = 'question';
+      continue;
+    }
     if (line === 'SAMPLE_ANSWER') {
       mode = 'answer';
       continue;
@@ -141,11 +146,13 @@ const parseRecoveredAnswer = (content: string) => {
       continue;
     }
     if (!mode) continue;
+    if (mode === 'question') questionLines.push(rawLine);
     if (mode === 'answer') answerLines.push(rawLine);
     if (mode === 'criteria') criteriaLines.push(rawLine);
   }
 
   return {
+    cleanedQuestionText: questionLines.join('\n').trim(),
     sampleAnswer: answerLines.join('\n').trim(),
     markingCriteria: criteriaLines.join('\n').trim(),
   };
@@ -172,6 +179,9 @@ RELATED CONTEXT (earlier subparts in same main question)
 ${args.contextBlocks.join('\n\n')}
 
 Requirements:
+- First, clean and normalize the TARGET QUESTION LaTeX. Keep all mathematical meaning intact.
+- Remove OCR artifacts and malformed LaTeX wrappers.
+- Remove any \\includegraphics commands or markdown image embeds from the cleaned question text.
 - Use the related context only when relevant to infer definitions, intermediate values, or setup from earlier subparts.
 - If a needed value is still missing, make the minimum explicit assumption and proceed.
 - Produce a clear, fully worked sample solution in LaTeX.
@@ -179,6 +189,9 @@ Requirements:
 - Do not include any extra commentary outside the required output format.
 
 Output exactly in this format:
+QUESTION_CONTENT_CLEANED
+<cleaned LaTeX question text only>
+
 SAMPLE_ANSWER
 <fully worked LaTeX solution>
 
@@ -441,6 +454,18 @@ export async function POST(request: Request) {
         }
 
         const parsedRecovery = parseRecoveredAnswer(recoveryContent);
+        if (!parsedRecovery.cleanedQuestionText) {
+          failedNotEnoughContextRecoveries += 1;
+          recoveryOutputs.push({
+            questionId: target.id,
+            questionNumber: target.question_number,
+            success: false,
+            reason: 'Recovered cleaned question text was empty',
+            rawModelOutput: recoveryContent,
+          });
+          continue;
+        }
+
         if (!parsedRecovery.sampleAnswer || isNotEnoughContextAnswer(parsedRecovery.sampleAnswer)) {
           failedNotEnoughContextRecoveries += 1;
           recoveryOutputs.push({
@@ -454,6 +479,7 @@ export async function POST(request: Request) {
         }
 
         const updatePayload: Record<string, unknown> = {
+          question_text: parsedRecovery.cleanedQuestionText,
           sample_answer: parsedRecovery.sampleAnswer,
         };
 
