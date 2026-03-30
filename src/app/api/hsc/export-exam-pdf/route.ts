@@ -441,6 +441,10 @@ const normalizeLatexBody = (value: string) =>
       .replace(/⇒/g, '\\ensuremath{\\Rightarrow}')
       .replace(/→/g, '\\ensuremath{\\to}')
       .replace(/↔/g, '\\ensuremath{\\leftrightarrow}')
+      // Protect bare implication commands that appear in prose (outside math mode).
+      .replace(/(?<!\\ensuremath\{)\\Rightarrow\b/g, '\\ensuremath{\\Rightarrow}')
+      .replace(/(?<!\\ensuremath\{)\\leftrightarrow\b/g, '\\ensuremath{\\leftrightarrow}')
+      .replace(/(?<!\\ensuremath\{)\\to\b/g, '\\ensuremath{\\to}')
       .replace(/×/g, '\\ensuremath{\\times}')
       .replace(/÷/g, '\\ensuremath{\\div}')
       .replace(/π/g, '\\ensuremath{\\pi}')
