@@ -148,12 +148,13 @@ const normalizeGreekWordTokens = (value: string) =>
 const ENSUREMATH_PREFIX_LENGTH = '\\ensuremath{'.length;
 // Allow for minor spacing/noise between prefix and token in generated fragments
 // (e.g., whitespace/newlines and small formatting tokens inserted by cleanup steps).
-// 24 chars comfortably covers typical inserted whitespace/indentation noise.
+// 24 chars covers common cases seen in generated content (newlines/indent + short tokens),
+// while keeping the lookback bounded for performance.
 const ENSUREMATH_NOISE_LOOKBACK = 24;
 const ENSUREMATH_PREFIX_LOOKBACK = ENSUREMATH_PREFIX_LENGTH + ENSUREMATH_NOISE_LOOKBACK;
 const BARE_MATH_COMMAND_PATTERN = /\\(?:Rightarrow|leftrightarrow|to|perp|boxed|prime|not|mid|stackrel)(?![A-Za-z])/g;
 
-const wrapBareImplicationCommandsOutsideMath = (value: string) =>
+const wrapBareMathCommandsOutsideMath = (value: string) =>
   String(value || '').replace(BARE_MATH_COMMAND_PATTERN, (match, offset, source) => {
     if (source.slice(Math.max(0, offset - ENSUREMATH_PREFIX_LOOKBACK), offset).endsWith('\\ensuremath{')) return match;
     if (isInsideMathAt(source, offset)) return match;
@@ -404,7 +405,7 @@ const escapeAmpersandsOutsideAlignment = (value: string) => {
 };
 
 const normalizeLatexBody = (value: string) =>
-  wrapBareImplicationCommandsOutsideMath(
+  wrapBareMathCommandsOutsideMath(
     escapeAmpersandsOutsideAlignment(
       wrapParenthesizedMathLikeSegments(
         sanitizeMisplacedTableRules(
