@@ -148,8 +148,8 @@ const normalizeGreekWordTokens = (value: string) =>
 const ENSUREMATH_PREFIX_LENGTH = '\\ensuremath{'.length;
 // Allow for minor spacing/noise between prefix and token in generated fragments
 // (e.g., whitespace/newlines and small formatting tokens inserted by cleanup steps).
-// 24 chars covers common cases seen in generated content (newlines/indent + short tokens),
-// while keeping the lookback bounded for performance.
+// 24 chars covers observed fragments such as "\ensuremath{\n  \to" and
+// "\ensuremath{ \textstyle \Rightarrow", while keeping lookback bounded.
 const ENSUREMATH_NOISE_LOOKBACK = 24;
 const ENSUREMATH_PREFIX_LOOKBACK = ENSUREMATH_PREFIX_LENGTH + ENSUREMATH_NOISE_LOOKBACK;
 const BARE_MATH_COMMAND_PATTERN = /\\(?:Rightarrow|leftrightarrow|to|perp|boxed|prime|not|mid|stackrel)(?![A-Za-z])/g;
@@ -219,7 +219,8 @@ const repairMatrixRowSeparators = (value: string) =>
       const repaired = body
         // Single-backslash + letter inside matrix body is usually a broken row separator.
         .replace(/(?<!\\)\\([a-zA-Z])(?![a-zA-Z])/g, (_m, letter) => `\\\\${letter}`)
-        // Repair single-backslash row separators before signed command-leading entries (e.g. \-\sqrt6).
+        // Repair lone "\" used as row breaks when next row starts with signed command terms,
+        // e.g. "...\-\sqrt6..." where optional spaces may surround "-" before "\sqrt".
         .replace(/(?<!\\)\\(?=\s*[-+]\s*\\[A-Za-z])/g, '\\\\')
         // Also repair single-backslash row separators before numeric/sign-leading entries.
         .replace(/(?<!\\)\\(?=\s*[-+]?\d)/g, '\\\\');
