@@ -2033,10 +2033,14 @@ export async function POST(request: Request) {
           return asImageDataUrlOrNull(await toDataUrl(resolved));
         };
 
-        const mcqOptionAImage = questionType === 'multiple_choice' ? await resolveOptionImageData('A') : null;
-        const mcqOptionBImage = questionType === 'multiple_choice' ? await resolveOptionImageData('B') : null;
-        const mcqOptionCImage = questionType === 'multiple_choice' ? await resolveOptionImageData('C') : null;
-        const mcqOptionDImage = questionType === 'multiple_choice' ? await resolveOptionImageData('D') : null;
+        const [mcqOptionAImage, mcqOptionBImage, mcqOptionCImage, mcqOptionDImage] = questionType === 'multiple_choice'
+          ? await Promise.all([
+              resolveOptionImageData('A'),
+              resolveOptionImageData('B'),
+              resolveOptionImageData('C'),
+              resolveOptionImageData('D'),
+            ])
+          : [null, null, null, null];
 
         solvedBlocks.push({
           index: sourceQuestion.index,
@@ -2253,7 +2257,7 @@ export async function POST(request: Request) {
       splitQuestionsJson: {
         total: splitBlocks.length,
         processed: questionBlocks.length,
-        groupedBatches: 0,
+        groupedBatches: questionBlocks.length,
         groupingMode,
         questions: questionBlocks,
         rawChatGptOutput: splitParsed,
