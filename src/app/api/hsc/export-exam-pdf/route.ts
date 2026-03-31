@@ -145,6 +145,22 @@ const normalizeGreekWordTokens = (value: string) =>
     .replace(/(?<!\\)\btheta\b/gi, '\\theta')
     .replace(/(?<!\\)\bpi\b/gi, '\\pi');
 
+const ENSUREMATH_PREFIX_LENGTH = '\\ensuremath{'.length;
+// Allow for minor spacing/noise between prefix and token in generated fragments
+// (e.g., whitespace/newlines and small formatting tokens inserted by cleanup steps).
+// 24 chars covers observed fragments such as "\ensuremath{\n  \to" and
+// "\ensuremath{ \textstyle \Rightarrow", while keeping lookback bounded.
+const ENSUREMATH_NOISE_LOOKBACK = 24;
+const ENSUREMATH_PREFIX_LOOKBACK = ENSUREMATH_PREFIX_LENGTH + ENSUREMATH_NOISE_LOOKBACK;
+const BARE_MATH_COMMAND_PATTERN = /\\(?:Rightarrow|leftrightarrow|to|perp|boxed|prime|not|mid|stackrel)(?![A-Za-z])/g;
+
+const wrapBareMathCommandsOutsideMath = (value: string) =>
+  String(value || '').replace(BARE_MATH_COMMAND_PATTERN, (match, offset, source) => {
+    if (source.slice(Math.max(0, offset - ENSUREMATH_PREFIX_LOOKBACK), offset).endsWith('\\ensuremath{')) return match;
+    if (isInsideMathAt(source, offset)) return match;
+    return `\\ensuremath{${match}}`;
+  });
+
 /** Convert malformed \left\{ ... \right. piecewise blocks into a proper cases environment. */
 const normalizeMalformedPiecewiseBlocks = (value: string) =>
   String(value || '').replace(/\\left\\\{([\s\S]*?)\\right\./g, (_match, rawBody: string) => {
@@ -203,6 +219,9 @@ const repairMatrixRowSeparators = (value: string) =>
       const repaired = body
         // Single-backslash + letter inside matrix body is usually a broken row separator.
         .replace(/(?<!\\)\\([a-zA-Z])(?![a-zA-Z])/g, (_m, letter) => `\\\\${letter}`)
+        // Repair lone "\" used as row breaks when next row starts with signed command terms,
+        // e.g. "...\-\sqrt6..." where optional spaces may surround "-" before "\sqrt".
+        .replace(/(?<!\\)\\(?=\s*[-+]\s*\\[A-Za-z])/g, '\\\\')
         // Also repair single-backslash row separators before numeric/sign-leading entries.
         .replace(/(?<!\\)\\(?=\s*[-+]?\d)/g, '\\\\');
       return `\\begin{${env}}${repaired}\\end{${env}}`;
@@ -387,21 +406,22 @@ const escapeAmpersandsOutsideAlignment = (value: string) => {
 };
 
 const normalizeLatexBody = (value: string) =>
-  escapeAmpersandsOutsideAlignment(
-    wrapParenthesizedMathLikeSegments(
-      sanitizeMisplacedTableRules(
-        normalizeMalformedPiecewiseBlocks(
-        repairCasesRowSeparators(
-        repairTableRowSeparators(
-          repairMatrixRowSeparators(
-            convertPlainAmpersandTables(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+  wrapBareMathCommandsOutsideMath(
+    escapeAmpersandsOutsideAlignment(
+      wrapParenthesizedMathLikeSegments(
+        sanitizeMisplacedTableRules(
+          normalizeMalformedPiecewiseBlocks(
+          repairCasesRowSeparators(
+          repairTableRowSeparators(
+            repairMatrixRowSeparators(
+              convertPlainAmpersandTables(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+            )
+          )
+          )
           )
         )
-        )
-        )
-      )
-      .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
-      .replace(/\\begin\{table\}[\s\S]*?\\end\{table\}/gi, (match) => {
+        .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
+        .replace(/\\begin\{table\}[\s\S]*?\\end\{table\}/gi, (match) => {
         // Extract the tabular environment from within the table float
         const tabularMatch = match.match(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/i);
         if (tabularMatch) {
@@ -457,8 +477,9 @@ const normalizeLatexBody = (value: string) =>
       .replace(/Δ/g, '\\ensuremath{\\Delta}')
       .replace(/Σ/g, '\\ensuremath{\\Sigma}')
       .replace(/Ω/g, '\\ensuremath{\\Omega}')
-      .replace(/√/g, '\\ensuremath{\\sqrt{}}')
-      .trim()
+        .replace(/√/g, '\\ensuremath{\\sqrt{}}')
+        .trim()
+      )
     )
   );
 
@@ -880,6 +901,7 @@ const SAFE_LATEX_COMMANDS = new Set([
   'sin', 'cos', 'tan', 'sec', 'cosec', 'cot', 'operatorname',
   'alpha', 'beta', 'gamma', 'delta', 'theta', 'lambda', 'mu', 'sigma', 'phi', 'omega',
   'pi', 'angle', 'to', 'Rightarrow', 'leftrightarrow', 'approx',
+  'perp', 'boxed', 'prime', 'not', 'mid', 'stackrel',
   'in', 'notin', 'subset', 'supset', 'subseteq', 'supseteq', 'cup', 'cap',
   'exists', 'forall', 'implies', 'iff', 'neg', 'land', 'lor',
   'Delta', 'Sigma', 'Omega',
