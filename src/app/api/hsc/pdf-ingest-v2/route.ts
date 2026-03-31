@@ -1358,6 +1358,19 @@ const parseMcqOptionsFromLatex = (latex: string): ParsedMcqOption[] => {
   return parsed;
 };
 
+const mergeOptionImageRef = (args: {
+  label: McqOptionLabel;
+  entryLevelRef: string | null | undefined;
+  optionImageRefs: ReturnType<typeof normalizeOptionImageRefs>;
+  fallbackRef: string | null | undefined;
+}) => {
+  const { label, entryLevelRef, optionImageRefs, fallbackRef } = args;
+  const primary = String(entryLevelRef || '').trim();
+  const fromMap = String(optionImageRefs[label] || '').trim();
+  const fromFallback = String(fallbackRef || '').trim();
+  return primary || fromMap || fromFallback || null;
+};
+
 const formatMathpixMarkdownWithOpenAi = async (args: {
   openai: OpenAI;
   rawMarkdown: string;
@@ -1864,6 +1877,10 @@ export async function POST(request: Request) {
       questionImageDataUrls: string[];
       questionType: 'written' | 'multiple_choice';
       mcqOptions: ParsedMcqOption[];
+      mcqOptionAImage: string | null;
+      mcqOptionBImage: string | null;
+      mcqOptionCImage: string | null;
+      mcqOptionDImage: string | null;
       mcqCorrectAnswer: 'A' | 'B' | 'C' | 'D' | null;
       formattedQuestionLatex: string;
       solutionLatex: string;
@@ -1871,21 +1888,9 @@ export async function POST(request: Request) {
     }> = [];
     const splitSolveFailures: Array<Record<string, unknown>> = [];
 
-    const groupedSolveBatches = groupParsedQuestions(
-      questionBlocks.map((block) => ({
-        index: block.index,
-        label: block.label,
-        questionNumber: block.questionNumber,
-        latex: block.latex,
-        imageRefs: block.imageRefs,
-        isLikelyMcq: false,
-      })),
-      groupingMode
-    );
-
-    for (const batch of groupedSolveBatches) {
+    for (const sourceQuestion of questionBlocks) {
       try {
-        const referencedImagePaths = batch.imageRefs
+        const referencedImagePaths = sourceQuestion.imageRefs
           .map((ref) => resolveImageFromReference(ref, mathpix.imageFiles))
           .filter((value): value is string => Boolean(value));
 
@@ -1893,30 +1898,26 @@ export async function POST(request: Request) {
           {
             type: 'text',
             text: [
-              `Batch label: ${batch.label}`,
-              `Grouping mode: ${groupingMode}`,
-              `Batch size: ${batch.questions.length}`,
+              `Question label: ${sourceQuestion.label}`,
+              `Question number: ${sourceQuestion.questionNumber || sourceQuestion.label}`,
               `Attached image count: ${referencedImagePaths.length}`,
               'Return STRICT JSON only:',
-              '{"solutions":[{"questionNumber":"2|11 (a)|11 (a)(i)","label":"Question 11 (a)(i)","questionType":"written|multiple_choice","formattedQuestionLatex":"...","mcqOptions":[{"label":"A","text":"..."},{"label":"B","text":"..."},{"label":"C","text":"..."},{"label":"D","text":"..."}],"mcqCorrectAnswer":"A|B|C|D|null","solutionLatex":"...","questionImageRefs":["mathpix-image-ref"]}]}',
+              '{"questionNumber":"2|11 (a)|11 (a)(i)","label":"Question 11 (a)(i)","questionType":"written|multiple_choice","formattedQuestionLatex":"...","mcqOptions":[{"label":"A","text":"...","imageRef":"mathpix-image-ref|null"},{"label":"B","text":"...","imageRef":"mathpix-image-ref|null"},{"label":"C","text":"...","imageRef":"mathpix-image-ref|null"},{"label":"D","text":"...","imageRef":"mathpix-image-ref|null"}],"optionImageRefs":{"A":"mathpix-image-ref|null","B":"mathpix-image-ref|null","C":"mathpix-image-ref|null","D":"mathpix-image-ref|null"},"mcqCorrectAnswer":"A|B|C|D|null","solutionLatex":"...","questionImageRefs":["mathpix-image-ref"]}',
               '',
               CRITICAL_SPLITTING_RULE,
               'Rules:',
-              `- Return exactly ${batch.questions.length} solutions in original order, one per input question block.`,
-              '- Do not merge or drop any question in the batch.',
+              '- Return exactly one solved output for this input question block.',
               '- Do not repeat shared context across sibling subparts. If a shared table/graph/setup appears in one subpart, avoid duplicating it in later subparts.',
               '- Identify whether the question is written or multiple-choice and return it as questionType.',
               '- If questionType is multiple_choice: return all options in mcqOptions and keep formattedQuestionLatex as the question stem only (no options).',
               '- If questionType is written: set mcqOptions to [] and mcqCorrectAnswer to null.',
+              '- For MCQ option images, include per-option image refs in optionImageRefs and/or each mcqOptions[].imageRef.',
               '- Include questionImageRefs for each solution so image association is explicit.',
               '- If images are attached, use them for solving but do not describe image content in the output text.',
               `- ${RENDER_SAFE_LATEX_RULES}`,
               '',
-              'Input question blocks LaTeX (in order):',
-              ...batch.questions.map((question, idx) => [
-                `--- ${idx + 1}. ${question.label} ---`,
-                question.latex,
-              ].join('\n')),
+              'Input question LaTeX:',
+              sourceQuestion.latex,
             ].join('\n'),
           },
         ];
@@ -1941,7 +1942,7 @@ export async function POST(request: Request) {
           messages: [
             {
               role: 'system',
-              content: `You are cleaning OCR LaTeX exam questions and producing solved outputs. Preserve math meaning. Return JSON only with questionNumber, questionType, formattedQuestionLatex, mcqOptions, mcqCorrectAnswer, solutionLatex. questionType must be exactly "written" or "multiple_choice". For multiple_choice, return all options in mcqOptions and keep formattedQuestionLatex as the stem only with no option lines. For written, return mcqOptions as [] and mcqCorrectAnswer as null. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${LATEX_RULES} ${TABLE_RULES} ${RENDER_SAFE_LATEX_RULES} If images are provided, do not describe image contents in output text. Use images only to solve. Do not include markdown code fences.`,
+              content: `You are cleaning OCR LaTeX exam questions and producing solved outputs. Preserve math meaning. Return JSON only with questionNumber, questionType, formattedQuestionLatex, mcqOptions, optionImageRefs, questionImageRefs, mcqCorrectAnswer, solutionLatex. questionType must be exactly "written" or "multiple_choice". For multiple_choice, return all options in mcqOptions and keep formattedQuestionLatex as the stem only with no option lines. For written, return mcqOptions as [] and mcqCorrectAnswer as null. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} If images are provided, do not describe image contents in output text. Use images only to solve. Do not include markdown code fences.`,
             },
             {
               role: 'user',
@@ -1951,112 +1952,148 @@ export async function POST(request: Request) {
         });
 
         const rawSolveOutput = getCompletionText(solveCompletion.choices?.[0]?.message?.content);
-        const solveParsedRoot = parseModelJsonObject(rawSolveOutput, `solve-question-batch-${batch.index}`) as Record<string, unknown>;
-        const solveItemsRaw = Array.isArray(solveParsedRoot.solutions)
-          ? solveParsedRoot.solutions
-          : [solveParsedRoot];
+        const solveParsedRoot = parseModelJsonObject(rawSolveOutput, `solve-question-${sourceQuestion.index}`) as Record<string, unknown>;
+        const solveParsed = solveParsedRoot && typeof solveParsedRoot === 'object'
+          ? (Array.isArray(solveParsedRoot.solutions)
+              ? (solveParsedRoot.solutions[0] as Record<string, unknown> | undefined) || {}
+              : (solveParsedRoot.solution && typeof solveParsedRoot.solution === 'object'
+                  ? (solveParsedRoot.solution as Record<string, unknown>)
+                  : solveParsedRoot))
+          : {};
 
-        if (solveItemsRaw.length !== batch.questions.length) {
-          throw new Error(
-            `Solve output returned ${solveItemsRaw.length} items for batch size ${batch.questions.length}`
-          );
+        const solvedQuestionNumberRaw = String(solveParsed.questionNumber || '').trim();
+        const solvedQuestionNumber = solvedQuestionNumberRaw || sourceQuestion.questionNumber || sourceQuestion.label;
+
+        const normalizedQuestionType = String(solveParsed.questionType || '').trim().toLowerCase();
+        const questionType: 'written' | 'multiple_choice' = normalizedQuestionType === 'multiple_choice'
+          ? 'multiple_choice'
+          : 'written';
+
+        const modelOptionImageRefs = normalizeOptionImageRefs(solveParsed.optionImageRefs);
+        const parsedModelMcqOptions: ParsedMcqOption[] = Array.isArray(solveParsed.mcqOptions)
+          ? solveParsed.mcqOptions
+              .map((entry): ParsedMcqOption | null => {
+                const record = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : null;
+                if (!record) return null;
+
+                const labelRaw = String(record.label || '').trim().toUpperCase();
+                const label = ['A', 'B', 'C', 'D'].includes(labelRaw) ? (labelRaw as McqOptionLabel) : null;
+                if (!label) return null;
+
+                const text = sanitizeMcqOptionText(record.text == null ? null : String(record.text));
+                if (!text) return null;
+
+                const optionImageRef = mergeOptionImageRef({
+                  label,
+                  entryLevelRef: record.imageRef == null ? null : String(record.imageRef),
+                  optionImageRefs: modelOptionImageRefs,
+                  fallbackRef: null,
+                });
+                return {
+                  label,
+                  text,
+                  imageRef: optionImageRef,
+                };
+              })
+              .filter((entry): entry is ParsedMcqOption => entry !== null)
+          : [];
+
+        const formattedQuestionStem = String(solveParsed.formattedQuestionLatex || '').trim();
+        const fallbackParsedOptions = parseMcqOptionsFromLatex(formattedQuestionStem);
+        const mcqOptions = questionType === 'multiple_choice'
+          ? (parsedModelMcqOptions.length ? parsedModelMcqOptions : fallbackParsedOptions)
+          : [];
+
+        const optionRefByLabel = new Map<McqOptionLabel, string | null>();
+        for (const label of ['A', 'B', 'C', 'D'] as const) {
+          const fromModelOption = parsedModelMcqOptions.find((option) => option.label === label)?.imageRef || null;
+          const fromFallbackOption = fallbackParsedOptions.find((option) => option.label === label)?.imageRef || null;
+          optionRefByLabel.set(label, mergeOptionImageRef({
+            label,
+            entryLevelRef: fromModelOption,
+            optionImageRefs: modelOptionImageRefs,
+            fallbackRef: fromFallbackOption,
+          }));
         }
 
-        for (let i = 0; i < batch.questions.length; i += 1) {
-          const sourceQuestion = batch.questions[i];
-          const solveParsed = solveItemsRaw[i] && typeof solveItemsRaw[i] === 'object'
-            ? (solveItemsRaw[i] as Record<string, unknown>)
-            : {};
+        const formattedQuestionLatex = questionType === 'multiple_choice'
+          ? stripMcqOptionLines(formattedQuestionStem)
+          : formattedQuestionStem;
 
-          const solvedQuestionNumberRaw = String(solveParsed.questionNumber || '').trim();
-          const solvedQuestionNumber = solvedQuestionNumberRaw || sourceQuestion.questionNumber || sourceQuestion.label;
+        const mcqCorrectAnswerRaw = String(solveParsed.mcqCorrectAnswer || '').trim().toUpperCase();
+        const mcqCorrectAnswer = questionType === 'multiple_choice' && ['A', 'B', 'C', 'D'].includes(mcqCorrectAnswerRaw)
+          ? (mcqCorrectAnswerRaw as 'A' | 'B' | 'C' | 'D')
+          : null;
+        const solutionLatex = String(solveParsed.solutionLatex || '').trim();
 
-          const normalizedQuestionType = String(solveParsed.questionType || '').trim().toLowerCase();
-          const questionType: 'written' | 'multiple_choice' = normalizedQuestionType === 'multiple_choice'
-            ? 'multiple_choice'
-            : 'written';
-
-          const parsedModelMcqOptions: ParsedMcqOption[] = Array.isArray(solveParsed.mcqOptions)
-            ? solveParsed.mcqOptions
-                .map((entry): ParsedMcqOption | null => {
-                  const record = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : null;
-                  if (!record) return null;
-
-                  const labelRaw = String(record.label || '').trim().toUpperCase();
-                  const label = ['A', 'B', 'C', 'D'].includes(labelRaw) ? (labelRaw as McqOptionLabel) : null;
-                  if (!label) return null;
-
-                  const text = sanitizeMcqOptionText(record.text == null ? null : String(record.text));
-                  if (!text) return null;
-
-                  return {
-                    label,
-                    text,
-                    imageRef: null,
-                  };
-                })
-                .filter((entry): entry is ParsedMcqOption => entry !== null)
-            : [];
-
-          const formattedQuestionStem = String(solveParsed.formattedQuestionLatex || '').trim();
-          const fallbackParsedOptions = parseMcqOptionsFromLatex(formattedQuestionStem);
-          const mcqOptions = questionType === 'multiple_choice'
-            ? (parsedModelMcqOptions.length ? parsedModelMcqOptions : fallbackParsedOptions)
-            : [];
-
-          const formattedQuestionLatex = questionType === 'multiple_choice'
-            ? stripMcqOptionLines(formattedQuestionStem)
-            : formattedQuestionStem;
-
-          const mcqCorrectAnswerRaw = String(solveParsed.mcqCorrectAnswer || '').trim().toUpperCase();
-          const mcqCorrectAnswer = questionType === 'multiple_choice' && ['A', 'B', 'C', 'D'].includes(mcqCorrectAnswerRaw)
-            ? (mcqCorrectAnswerRaw as 'A' | 'B' | 'C' | 'D')
-            : null;
-          const solutionLatex = String(solveParsed.solutionLatex || '').trim();
-
-          if (!formattedQuestionLatex || !solutionLatex) {
-            throw new Error('Solve output missing formattedQuestionLatex or solutionLatex');
-          }
-
-          const modelImageRefs = Array.isArray(solveParsed.questionImageRefs)
-            ? solveParsed.questionImageRefs.map((value) => String(value || '').trim()).filter(Boolean)
-            : [];
-          const mergedImageRefs = Array.from(new Set([...modelImageRefs, ...sourceQuestion.imageRefs]));
-          const questionImagePaths = mergedImageRefs
-            .map((ref) => resolveImageFromReference(ref, mathpix.imageFiles))
-            .filter((value): value is string => Boolean(value));
-          const perQuestionImageDataUrls = (
-            await Promise.all(questionImagePaths.map((imagePath) => toDataUrl(imagePath)))
-          )
-            .map((value) => asImageDataUrlOrNull(value))
-            .filter((value): value is string => Boolean(value));
-
-          solvedBlocks.push({
-            index: sourceQuestion.index,
-            label: sourceQuestion.label,
-            questionNumber: solvedQuestionNumber,
-            inputLatex: sourceQuestion.latex,
-            imageRefs: mergedImageRefs,
-            imageCount: questionImagePaths.length,
-            questionImageDataUrls: perQuestionImageDataUrls,
-            questionType,
-            mcqOptions,
-            mcqCorrectAnswer,
-            formattedQuestionLatex,
-            solutionLatex,
-            rawChatGptOutput: solveParsed,
-          });
+        if (!formattedQuestionLatex || !solutionLatex) {
+          throw new Error('Solve output missing formattedQuestionLatex or solutionLatex');
         }
+
+        const modelImageRefs = Array.isArray(solveParsed.questionImageRefs)
+          ? solveParsed.questionImageRefs.map((value) => String(value || '').trim()).filter(Boolean)
+          : [];
+        const mergedImageRefs = Array.from(new Set([...modelImageRefs, ...sourceQuestion.imageRefs]));
+
+        const optionImageRefsInUse = new Set(
+          (['A', 'B', 'C', 'D'] as const)
+            .map((label) => optionRefByLabel.get(label))
+            .filter((value): value is string => Boolean(value))
+        );
+
+        const questionImagePaths = mergedImageRefs
+          .filter((ref) => !optionImageRefsInUse.has(ref))
+          .map((ref) => resolveImageFromReference(ref, mathpix.imageFiles))
+          .filter((value): value is string => Boolean(value));
+        const perQuestionImageDataUrls = (
+          await Promise.all(questionImagePaths.map((imagePath) => toDataUrl(imagePath)))
+        )
+          .map((value) => asImageDataUrlOrNull(value))
+          .filter((value): value is string => Boolean(value));
+
+        const resolveOptionImageData = async (label: McqOptionLabel) => {
+          const optionRef = optionRefByLabel.get(label);
+          if (!optionRef) return null;
+          const resolved = resolveImageFromReference(optionRef, mathpix.imageFiles);
+          if (!resolved) return null;
+          return asImageDataUrlOrNull(await toDataUrl(resolved));
+        };
+
+        const [mcqOptionAImage, mcqOptionBImage, mcqOptionCImage, mcqOptionDImage] = questionType === 'multiple_choice'
+          ? await Promise.all([
+              resolveOptionImageData('A'),
+              resolveOptionImageData('B'),
+              resolveOptionImageData('C'),
+              resolveOptionImageData('D'),
+            ])
+          : [null, null, null, null];
+
+        solvedBlocks.push({
+          index: sourceQuestion.index,
+          label: sourceQuestion.label,
+          questionNumber: solvedQuestionNumber,
+          inputLatex: sourceQuestion.latex,
+          imageRefs: mergedImageRefs,
+          imageCount: questionImagePaths.length,
+          questionImageDataUrls: perQuestionImageDataUrls,
+          questionType,
+          mcqOptions,
+          mcqOptionAImage,
+          mcqOptionBImage,
+          mcqOptionCImage,
+          mcqOptionDImage,
+          mcqCorrectAnswer,
+          formattedQuestionLatex,
+          solutionLatex,
+          rawChatGptOutput: solveParsed,
+        });
       } catch (error) {
-        for (const sourceQuestion of batch.questions) {
-          splitSolveFailures.push({
-            index: sourceQuestion.index,
-            label: sourceQuestion.label,
-            questionNumber: sourceQuestion.questionNumber,
-            batchLabel: batch.label,
-            reason: error instanceof Error ? error.message : String(error),
-          });
-        }
+        splitSolveFailures.push({
+          index: sourceQuestion.index,
+          label: sourceQuestion.label,
+          questionNumber: sourceQuestion.questionNumber,
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
@@ -2167,10 +2204,10 @@ export async function POST(request: Request) {
         mcq_option_b: isMultipleChoice ? (optionByLabel.get('B')?.text || null) : null,
         mcq_option_c: isMultipleChoice ? (optionByLabel.get('C')?.text || null) : null,
         mcq_option_d: isMultipleChoice ? (optionByLabel.get('D')?.text || null) : null,
-        mcq_option_a_image: null,
-        mcq_option_b_image: null,
-        mcq_option_c_image: null,
-        mcq_option_d_image: null,
+        mcq_option_a_image: isMultipleChoice ? entry.mcqOptionAImage : null,
+        mcq_option_b_image: isMultipleChoice ? entry.mcqOptionBImage : null,
+        mcq_option_c_image: isMultipleChoice ? entry.mcqOptionCImage : null,
+        mcq_option_d_image: isMultipleChoice ? entry.mcqOptionDImage : null,
         mcq_correct_answer: isMultipleChoice ? entry.mcqCorrectAnswer : null,
         mcq_explanation: isMultipleChoice ? (cleanedSolution || null) : null,
         graph_image_data: questionImageDataUrls[0] || null,
@@ -2246,7 +2283,7 @@ export async function POST(request: Request) {
       splitQuestionsJson: {
         total: splitBlocks.length,
         processed: questionBlocks.length,
-        groupedBatches: groupedSolveBatches.length,
+        groupedBatches: questionBlocks.length,
         groupingMode,
         reasoningEffort,
         questions: questionBlocks,
