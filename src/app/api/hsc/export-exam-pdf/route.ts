@@ -151,10 +151,10 @@ const ENSUREMATH_PREFIX_LENGTH = '\\ensuremath{'.length;
 // 24 chars comfortably covers typical inserted whitespace/indentation noise.
 const ENSUREMATH_NOISE_LOOKBACK = 24;
 const ENSUREMATH_PREFIX_LOOKBACK = ENSUREMATH_PREFIX_LENGTH + ENSUREMATH_NOISE_LOOKBACK;
-const BARE_IMPLICATION_COMMAND_PATTERN = /\\(?:Rightarrow|leftrightarrow|to)(?![A-Za-z])/g;
+const BARE_MATH_COMMAND_PATTERN = /\\(?:Rightarrow|leftrightarrow|to|perp|boxed|prime|not|mid|stackrel)(?![A-Za-z])/g;
 
 const wrapBareImplicationCommandsOutsideMath = (value: string) =>
-  String(value || '').replace(BARE_IMPLICATION_COMMAND_PATTERN, (match, offset, source) => {
+  String(value || '').replace(BARE_MATH_COMMAND_PATTERN, (match, offset, source) => {
     if (source.slice(Math.max(0, offset - ENSUREMATH_PREFIX_LOOKBACK), offset).endsWith('\\ensuremath{')) return match;
     if (isInsideMathAt(source, offset)) return match;
     return `\\ensuremath{${match}}`;
@@ -218,6 +218,8 @@ const repairMatrixRowSeparators = (value: string) =>
       const repaired = body
         // Single-backslash + letter inside matrix body is usually a broken row separator.
         .replace(/(?<!\\)\\([a-zA-Z])(?![a-zA-Z])/g, (_m, letter) => `\\\\${letter}`)
+        // Repair single-backslash row separators before signed command-leading entries (e.g. \-\sqrt6).
+        .replace(/(?<!\\)\\(?=\s*[-+]\s*\\[A-Za-z])/g, '\\\\')
         // Also repair single-backslash row separators before numeric/sign-leading entries.
         .replace(/(?<!\\)\\(?=\s*[-+]?\d)/g, '\\\\');
       return `\\begin{${env}}${repaired}\\end{${env}}`;
@@ -897,6 +899,7 @@ const SAFE_LATEX_COMMANDS = new Set([
   'sin', 'cos', 'tan', 'sec', 'cosec', 'cot', 'operatorname',
   'alpha', 'beta', 'gamma', 'delta', 'theta', 'lambda', 'mu', 'sigma', 'phi', 'omega',
   'pi', 'angle', 'to', 'Rightarrow', 'leftrightarrow', 'approx',
+  'perp', 'boxed', 'prime', 'not', 'mid', 'stackrel',
   'in', 'notin', 'subset', 'supset', 'subseteq', 'supseteq', 'cup', 'cap',
   'exists', 'forall', 'implies', 'iff', 'neg', 'land', 'lor',
   'Delta', 'Sigma', 'Omega',
