@@ -320,6 +320,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [pdfOcrPreviewResponse, setPdfOcrPreviewResponse] = useState<string>('');
   const [pdfIngestV2GroupingMode, setPdfIngestV2GroupingMode] = useState<'main_question' | 'letter_subpart'>('main_question');
   const [pdfIngestV2ClassifyAfterUpload, setPdfIngestV2ClassifyAfterUpload] = useState(true);
+  const [pdfIngestV2ReasoningEffort, setPdfIngestV2ReasoningEffort] = useState<'medium' | 'high'>('high');
   const [pdfGrade, setPdfGrade] = useState<'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12'>('Year 12');
   const [pdfYear, setPdfYear] = useState<string>(new Date().getFullYear().toString());
   const [pdfSubject, setPdfSubject] = useState<string>('Mathematics Advanced');
@@ -2996,6 +2997,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     payload.append('overwrite', pdfOverwrite ? 'true' : 'false');
     payload.append('groupingMode', pdfIngestV2GroupingMode);
     payload.append('classifyAfterUpload', pdfIngestV2ClassifyAfterUpload ? 'true' : 'false');
+    payload.append('reasoningEffort', pdfIngestV2ReasoningEffort);
 
     try {
       setPdfIngestV2Status('uploading');
@@ -3054,6 +3056,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     payload.append('subject', pdfSubject);
     payload.append('school', pdfSchoolName.trim() || 'OCR Preview');
     payload.append('groupingMode', pdfIngestV2GroupingMode);
+    payload.append('reasoningEffort', pdfIngestV2ReasoningEffort);
     payload.append('maxQuestions', '200');
     payload.append('dryRun', 'true');
 
@@ -5381,6 +5384,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                   pdfOcrPreviewResponse={pdfOcrPreviewResponse}
                   pdfIngestV2GroupingMode={pdfIngestV2GroupingMode}
                   pdfIngestV2ClassifyAfterUpload={pdfIngestV2ClassifyAfterUpload}
+                  pdfIngestV2ReasoningEffort={pdfIngestV2ReasoningEffort}
                   pdfGrade={pdfGrade}
                   pdfYear={pdfYear}
                   pdfSubject={pdfSubject}
@@ -5432,6 +5436,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                   setPdfIngestV2File={setPdfIngestV2File}
                   setPdfIngestV2GroupingMode={setPdfIngestV2GroupingMode}
                   setPdfIngestV2ClassifyAfterUpload={setPdfIngestV2ClassifyAfterUpload}
+                  setPdfIngestV2ReasoningEffort={setPdfIngestV2ReasoningEffort}
                   setPdfGrade={setPdfGrade}
                   setPdfYear={setPdfYear}
                   setPdfSubject={setPdfSubject}

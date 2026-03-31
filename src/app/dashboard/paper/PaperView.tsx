@@ -54,6 +54,33 @@ export default function PaperView({
     setDrawTool('pen');
   }, [question?.id]);
 
+  const activeDisplayGroup = React.useMemo(() => {
+    if (!isPaperMode || !Array.isArray(paperQuestions) || paperQuestions.length === 0) {
+      return [];
+    }
+
+    const groupInfo = getDisplayGroupAt(paperQuestions, paperIndex);
+    if (!groupInfo || !Array.isArray(groupInfo.group)) {
+      return [];
+    }
+
+    return groupInfo.group;
+  }, [isPaperMode, paperQuestions, paperIndex, getDisplayGroupAt]);
+
+  const activeDisplayGroupIds = React.useMemo(() => {
+    const seen = new Set<string>();
+    const ids: string[] = [];
+
+    activeDisplayGroup.forEach((item: any) => {
+      const id = String(item?.id || '').trim();
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      ids.push(id);
+    });
+
+    return ids;
+  }, [activeDisplayGroup]);
+
   return (
                 <>
                   {/* Exam Review Mode: one question at a time */}
@@ -703,6 +730,7 @@ export default function PaperView({
                                     Question Info
                                   </p>
                                   <div className="space-y-1.5 text-sm" style={{ color: 'var(--clr-primary-a50)' }}>
+                                    <p><strong>ID{activeDisplayGroupIds.length > 1 ? 's' : ''}:</strong> {(activeDisplayGroupIds.length ? activeDisplayGroupIds : [question.id]).filter(Boolean).join(', ') || '-'}</p>
                                     <p><strong>Number:</strong> {question.question_number || '-'}</p>
                                     <p><strong>Marks:</strong> {question.marks ?? '-'}</p>
                                     <p><strong>Subject:</strong> {question.subject || '-'}</p>

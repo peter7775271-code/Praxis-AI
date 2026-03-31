@@ -134,7 +134,7 @@ export const TOPICS_BY_YEAR_SUBJECT: Record<YearLevel, Record<string, string[]>>
       'The normal distribution',
     ],
     'Mathematics Advanced': [
-      'Further graph transformations',
+      'Further graph transformations and modelling',
       'Sequences and series',
       'Differential calculus',
       'Integral calculus',

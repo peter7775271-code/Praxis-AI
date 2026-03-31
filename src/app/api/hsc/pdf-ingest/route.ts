@@ -30,7 +30,7 @@ const TOPIC_LISTS = {
       'The normal distribution',
     ],
     advanced: [
-      'Further graph transformations',
+      'Further graph transformations and modelling',
       'Sequences and series',
       'Differential calculus',
       'Integral calculus',

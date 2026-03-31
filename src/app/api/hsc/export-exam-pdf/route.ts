@@ -78,6 +78,11 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
     // Recover JSON-escaped inline math delimiters that arrive as \\( and \\).
     .replace(/\\\\\(/g, '\\(')
     .replace(/\\\\\)/g, '\\)')
+    .replace(/\\\\\[/g, '\\[')
+    .replace(/\\\\\]/g, '\\]')
+    // OCR/model output may emit prose words as fake commands right after display math,
+    // e.g. "\\]\\Let". Convert those to plain text and keep a safe line break.
+    .replace(/(\\\]|\\\)|\$\$)\s*\\([A-Z][a-z]{2,})\b/g, (_match, closer, word) => `${closer}\n${word}`)
     // Recover commands that were escaped as \{}command in degraded output paths.
     .replace(/\\\{\}\s*([A-Za-z]+)/g, '\\$1')
     .replace(/\\\{\}\s*([!,:;])/g, '\\$1')
@@ -91,6 +96,8 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
     .replace(/\\dfrac/g, '\\frac')
     // Repair fused command pairs from OCR/model output, e.g. \pidisplaystyle -> \pi\displaystyle.
     .replace(/\\(pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega)(displaystyle|textstyle)\b/g, '\\$1\\$2')
+    // Recover common bare LaTeX commands that were emitted without a leading backslash.
+    .replace(/(^|[^\\A-Za-z])(under(?:set|brace)|over(?:set|brace)|operatorname|frac|dfrac|sqrt|cdot)(?=\s*\{)/g, '$1\\$2')
     // Split fused command+word like \thetain → \theta in, \alphax → \alpha x.
     // Uses a function to pick the longest matching command, and skips splitting
     // when the full token is itself a valid LaTeX command (e.g. \left, \cosec).
@@ -112,6 +119,7 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
         'cosec', 'arcsin', 'arccos', 'arctan',
         'overrightarrow', 'overleftarrow', 'overline', 'underline',
         'overbrace', 'underbrace', 'widehat', 'widetilde',
+        'underset', 'overset',
         'noindent', 'newline', 'hspace', 'vspace', 'hline',
         'includegraphics', 'section', 'subsection', 'subsubsection',
         'item', 'itemsep', 'centering', 'label', 'ref', 'url', 'href',
@@ -140,6 +148,17 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
     // Drop stray backslashes that are not starting a command/escape and can crash pdflatex.
     .replace(/\\(?![A-Za-z]+|[%$&#_{}~^\\()\[\],;:! ])/g, '');
 
+const unwrapInlineMathInsideDisplayMath = (value: string) =>
+  String(value || '')
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, body) => {
+      const normalizedBody = String(body || '').replace(/\\\(([\s\S]*?)\\\)/g, '$1');
+      return `\\[${normalizedBody}\\]`;
+    })
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_match, body) => {
+      const normalizedBody = String(body || '').replace(/\\\(([\s\S]*?)\\\)/g, '$1');
+      return `$$${normalizedBody}$$`;
+    });
+
 const normalizeGreekWordTokens = (value: string) =>
   String(value || '')
     .replace(/(?<!\\)\btheta\b/gi, '\\theta')
@@ -152,7 +171,20 @@ const ENSUREMATH_PREFIX_LENGTH = '\\ensuremath{'.length;
 // "\ensuremath{ \textstyle \Rightarrow", while keeping lookback bounded.
 const ENSUREMATH_NOISE_LOOKBACK = 24;
 const ENSUREMATH_PREFIX_LOOKBACK = ENSUREMATH_PREFIX_LENGTH + ENSUREMATH_NOISE_LOOKBACK;
-const BARE_MATH_COMMAND_PATTERN = /\\(?:Rightarrow|leftrightarrow|to|perp|boxed|prime|not|mid|stackrel)(?![A-Za-z])/g;
+const BARE_MATH_COMMAND_PATTERN = /\\(?:Rightarrow|leftrightarrow|to|perp|prime|not|mid|stackrel)(?![A-Za-z])/g;
+const BOXED_COMMAND_WITH_ARG_PATTERN = /\\boxed\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g;
+
+const wrapBareBoxedOutsideMath = (value: string) =>
+  String(value || '').replace(BOXED_COMMAND_WITH_ARG_PATTERN, (match, boxedArg, offset, source) => {
+    if (source.slice(Math.max(0, offset - ENSUREMATH_PREFIX_LOOKBACK), offset).endsWith('\\ensuremath{')) return match;
+    if (isInsideMathAt(source, offset)) return match;
+    return `\\ensuremath{\\boxed{${boxedArg}}}`;
+  });
+
+const repairMalformedEnsureMathBoxed = (value: string) =>
+  String(value || '').replace(/\\ensuremath\{\s*\\boxed\s*\}\s*\{((?:[^{}]|\{[^{}]*\})+)\}/g, (_match, boxedArg) => {
+    return `\\ensuremath{\\boxed{${boxedArg}}}`;
+  });
 
 const wrapBareMathCommandsOutsideMath = (value: string) =>
   String(value || '').replace(BARE_MATH_COMMAND_PATTERN, (match, offset, source) => {
@@ -264,6 +296,8 @@ const wrapParenthesizedMathLikeSegments = (value: string) =>
   value.replace(/(^|[\s,:;])\(([^()\n]*\\(?:d?frac|sqrt)[^()\n]*)\)/g, (_match, prefix, expr) => {
     const candidate = String(expr || '').trim();
     if (!candidate) return _match;
+    // Avoid nesting delimiters like \( ... $...$ ... \), which breaks pdflatex.
+    if (/\$|\\\(|\\\)|\\\[|\\\]/.test(candidate)) return _match;
     return `${prefix}\\(${candidate}\\)`;
   });
 
@@ -405,10 +439,19 @@ const escapeAmpersandsOutsideAlignment = (value: string) => {
   });
 };
 
+const unwrapTextCommandOutsideMath = (value: string) =>
+  String(value || '').replace(/\\text\s*\{([^{}]*)\}/g, (match, content, offset, source) => {
+    if (isInsideMathAt(source, offset)) return match;
+    return String(content || '');
+  });
+
 const normalizeLatexBody = (value: string) =>
-  wrapBareMathCommandsOutsideMath(
+  unwrapTextCommandOutsideMath(repairMalformedEnsureMathBoxed(
+    wrapBareMathCommandsOutsideMath(
+      wrapBareBoxedOutsideMath(
     escapeAmpersandsOutsideAlignment(
       wrapParenthesizedMathLikeSegments(
+        unwrapInlineMathInsideDisplayMath(
         sanitizeMisplacedTableRules(
           normalizeMalformedPiecewiseBlocks(
           repairCasesRowSeparators(
@@ -446,12 +489,15 @@ const normalizeLatexBody = (value: string) =>
       .replace(/\bMARKS_(\d+)\b/g, 'MARKS\\_$1')
       .replace(/\bQUESTION_(\d+)\b/g, 'QUESTION\\_$1')
       .replace(/(^|[\s([\{\-+*/=,:;|])([0-9]*[A-Za-z]+)\^\(([^)]+)\)/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{(${powerExpr})}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])([0-9]*[A-Za-z]+)\^\{([^{}\n]+)\}/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{${powerExpr}}}`)
       .replace(/(^|[\s([\{\-+*/=,:;|])([0-9]*[A-Za-z]+)\^([A-Za-z])(?![A-Za-z0-9{])/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
       .replace(/(^|[\s([\{\-+*/=,:;|])([0-9]*[A-Za-z]+)\^([-+]?[0-9]+)(?=\b)/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
       .replace(/(^|[\s([\{\-+*/=,:;|])(\|[^|\n]+\|)\^\(([^)]+)\)/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{(${powerExpr})}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])(\|[^|\n]+\|)\^\{([^{}\n]+)\}/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{${powerExpr}}}`)
       .replace(/(^|[\s([\{\-+*/=,:;|])(\|[^|\n]+\|)\^([A-Za-z])(?![A-Za-z0-9{])/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
       .replace(/(^|[\s([\{\-+*/=,:;|])(\|[^|\n]+\|)\^([-+]?[0-9]+)(?=\b)/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
       .replace(/(^|[\s([\{\-+*/=,:;|])(\((?:[^()\n]|\([^()\n]*\))+\))\^\(([^)]+)\)/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{(${powerExpr})}}`)
+      .replace(/(^|[\s([\{\-+*/=,:;|])(\((?:[^()\n]|\([^()\n]*\))+\))\^\{([^{}\n]+)\}/g, (_match, prefix, base, powerExpr) => `${prefix}\\ensuremath{${base}^{${powerExpr}}}`)
       .replace(/(^|[\s([\{\-+*/=,:;|])(\((?:[^()\n]|\([^()\n]*\))+\))\^([A-Za-z])(?![A-Za-z0-9{])/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
       .replace(/(^|[\s([\{\-+*/=,:;|])(\((?:[^()\n]|\([^()\n]*\))+\))\^([-+]?[0-9]+)(?=\b)/g, (_match, prefix, base, power) => `${prefix}\\ensuremath{${base}^{${power}}}`)
       .replace(/∠/g, '\\ensuremath{\\angle}')
@@ -479,9 +525,12 @@ const normalizeLatexBody = (value: string) =>
       .replace(/Ω/g, '\\ensuremath{\\Omega}')
         .replace(/√/g, '\\ensuremath{\\sqrt{}}')
         .trim()
+        )
       )
     )
-  );
+      )
+    )
+  ));
 
 const normalizePlainBody = (value: string) =>
   normalizeEscapedLatexArtifacts(stripInvalidControlChars(value))
@@ -767,17 +816,6 @@ const normalizeInlineDollarMath = (value: string) => {
   return chars.join('');
 };
 
-const unwrapInlineMathInsideDisplayMath = (value: string) =>
-  value
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, body) => {
-      const normalizedBody = String(body || '').replace(/\\\(([\s\S]*?)\\\)/g, '$1');
-      return `\\[${normalizedBody}\\]`;
-    })
-    .replace(/\$\$([\s\S]*?)\$\$/g, (_match, body) => {
-      const normalizedBody = String(body || '').replace(/\\\(([\s\S]*?)\\\)/g, '$1');
-      return `$$${normalizedBody}$$`;
-    });
-
 const unwrapParenMathInsideInlineDollar = (value: string) => {
   const source = String(value || '');
   let output = '';
@@ -895,13 +933,14 @@ const finalizeCompileSafeBody = (value: string) =>
 
 const SAFE_LATEX_COMMANDS = new Set([
   'frac', 'dfrac', 'sqrt', 'left', 'right', 'cdot', 'times', 'div',
+  'binom', 'dbinom', 'tbinom',
   'circ', 'triangle',
   'le', 'leq', 'ge', 'geq', 'ne', 'neq', 'pm', 'mp', 'infty',
   'sum', 'int', 'lim', 'log', 'ln', 'exp',
   'sin', 'cos', 'tan', 'sec', 'cosec', 'cot', 'operatorname',
   'alpha', 'beta', 'gamma', 'delta', 'theta', 'lambda', 'mu', 'sigma', 'phi', 'omega',
   'pi', 'angle', 'to', 'Rightarrow', 'leftrightarrow', 'approx',
-  'perp', 'boxed', 'prime', 'not', 'mid', 'stackrel',
+  'perp', 'boxed', 'prime', 'not', 'mid', 'stackrel', 'underset', 'overset',
   'in', 'notin', 'subset', 'supset', 'subseteq', 'supseteq', 'cup', 'cap',
   'exists', 'forall', 'implies', 'iff', 'neg', 'land', 'lor',
   'Delta', 'Sigma', 'Omega',

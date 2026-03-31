@@ -115,6 +115,7 @@ type ParsedMcqOption = {
 };
 
 type GroupingMode = 'main_question' | 'letter_subpart';
+type ReasoningEffort = 'medium' | 'high';
 
 type MathpixCredentials = {
   appId: string;
@@ -173,6 +174,20 @@ const CRITICAL_SPLITTING_RULE = [
 const MCQ_RULES = 'For MCQ: keep options only in mcqOptions array. Remove option lines from questionText. Do not use display math delimiters in option text.';
 const LATEX_RULES = 'All mathematics must have explicit delimiters: $...$ for inline, \\[...\\] for display. Do not output plain-text math like "1/2 + 1/x^2 - 5" outside math mode.';
 const TABLE_RULES = 'For tables: Do NOT use \\begin{table}...\\end{table} floating environments. Instead, output tables using only \\begin{center}\\begin{tabular}{...}...\\end{tabular}\\end{center} for inline rendering. Remove \\caption, \\captionsetup, and other table metadata commands.';
+const RENDER_SAFE_LATEX_RULES = [
+  'Render-safe LaTeX rules (must follow exactly):',
+  '- Return valid LaTeX fragments only, never markdown fences or prose wrappers.',
+  '- Use only compile-safe commands and standard math environments; avoid custom macros and package-specific commands.',
+  '- Do not emit table/figure floats: never use \\begin{table}, \\end{table}, \\begin{figure}, \\end{figure}, \\caption, or \\captionsetup.',
+  '- If a table is needed, use only \\begin{center}\\begin{tabular}{...}...\\end{tabular}\\end{center}.',
+  '- Never emit image commands or markdown images: no \\includegraphics, \\graphicspath, or ![](...).',
+  '- Always keep math delimiters balanced and non-nested incorrectly: inline \\(...\\) or $...$, display \\[...\\], and avoid mixing inline delimiters inside display math.',
+  '- Keep all environments balanced with matching \\begin{...}/\\end{...} and preserve valid row separators in matrix/array/cases/tabular blocks.',
+  '- Do not output stray backslashes or fake commands (for example writing words as \\Word). Use plain text for normal words.',
+  '- Use escaped ampersands \\& in normal prose; use unescaped & only for alignment/table columns.',
+  '- Do not emit malformed \\left/\\right pairs. If one side is intentionally absent, use \\left. or \\right..',
+  '- Do not emit empty placeholders or unfinished expressions; every question and solution must be complete and compilable.',
+].join(' ');
 
 const classifyIngestError = (message: string) => {
   const normalized = String(message || '').toLowerCase();
@@ -262,6 +277,11 @@ const parseBoolean = (value: FormDataEntryValue | null, fallback = false) => {
   if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
   if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
   return fallback;
+};
+
+const parseReasoningEffort = (value: FormDataEntryValue | null, fallback: ReasoningEffort = 'high'): ReasoningEffort => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'medium' ? 'medium' : fallback;
 };
 
 const normalizePositiveInteger = (value: unknown, fallback = 0) => {
@@ -1341,15 +1361,16 @@ const parseMcqOptionsFromLatex = (latex: string): ParsedMcqOption[] => {
 const formatMathpixMarkdownWithOpenAi = async (args: {
   openai: OpenAI;
   rawMarkdown: string;
+  reasoningEffort: ReasoningEffort;
 }) => {
-  const { openai, rawMarkdown } = args;
+  const { openai, rawMarkdown, reasoningEffort } = args;
 
   const cleanedRawMarkdown = stripEmbeddedImageCommands(rawMarkdown);
   const boundedMarkdown = String(cleanedRawMarkdown || '').slice(0, 25000);
 
   const completion = await openai.chat.completions.create({
     model: MODEL_NAME,
-    reasoning_effort: 'high',
+    reasoning_effort: reasoningEffort,
     max_completion_tokens: 3000,
     messages: [
       {
@@ -1371,7 +1392,7 @@ const formatMathpixMarkdownWithOpenAi = async (args: {
   // Retry once with a simpler instruction set if the first pass returns no content.
   const retryCompletion = await openai.chat.completions.create({
     model: MODEL_NAME,
-    reasoning_effort: 'medium',
+    reasoning_effort: reasoningEffort,
     max_completion_tokens: 3000,
     messages: [
       {
@@ -1406,8 +1427,9 @@ const cleanQuestionWithOpenAi = async (args: {
   openai: OpenAI;
   question: ParsedQuestion;
   imageFiles: string[];
+  reasoningEffort: ReasoningEffort;
 }) => {
-  const { openai, question, imageFiles } = args;
+  const { openai, question, imageFiles, reasoningEffort } = args;
 
   const referencedImagePaths = question.imageRefs
     .map((ref) => resolveImageFromReference(ref, imageFiles))
@@ -1438,12 +1460,12 @@ const cleanQuestionWithOpenAi = async (args: {
 
   const completion = await openai.chat.completions.create({
     model: MODEL_NAME,
-    reasoning_effort: 'high',
+    reasoning_effort: reasoningEffort,
     max_completion_tokens: 10000,
     messages: [
       {
         role: 'system',
-        content: `Clean OCR exam content. JSON only, no markdown. Remove \\includegraphics. Concise LaTeX. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_RULES} ${TABLE_RULES} Written answers: step-by-step with clear final answer, blank lines between steps. questionType written|multiple_choice. Estimate marks 1-15. Reference MathPix image names in questionImageRefs/optionImageRefs keys.`,
+        content: `Clean OCR exam content. JSON only, no markdown. Remove \\includegraphics. Concise LaTeX. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_RULES} ${TABLE_RULES} ${RENDER_SAFE_LATEX_RULES} Written answers: step-by-step with clear final answer, blank lines between steps. questionType written|multiple_choice. Estimate marks 1-15. Reference MathPix image names in questionImageRefs/optionImageRefs keys.`,
       },
       {
         role: 'user',
@@ -1467,8 +1489,9 @@ const cleanQuestionBatchWithOpenAi = async (args: {
   openai: OpenAI;
   batch: ParsedQuestionBatch;
   imageFiles: string[];
+  reasoningEffort: ReasoningEffort;
 }) => {
-  const { openai, batch, imageFiles } = args;
+  const { openai, batch, imageFiles, reasoningEffort } = args;
 
   const inputQuestions = batch.questions.map((question) => ({
     index: question.index,
@@ -1481,6 +1504,7 @@ const cleanQuestionBatchWithOpenAi = async (args: {
       openai,
       question: batch.questions[0],
       imageFiles,
+      reasoningEffort,
     });
 
     return {
@@ -1518,7 +1542,7 @@ const cleanQuestionBatchWithOpenAi = async (args: {
     },
   ];
 
-  const systemPrompt = `Solve OCR-extracted exam questions. Output JSON only with key "solutions" containing array of {questionNumber, label, questionText, sampleSolution, marks, questionType, mcqOptions, mcqCorrectAnswer, questionImageRefs, optionImageRefs}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_RULES} ${TABLE_RULES} Step-by-step working with clear final answer. Remove image commands. Do not merge subparts.`;
+  const systemPrompt = `Solve OCR-extracted exam questions. Output JSON only with key "solutions" containing array of {questionNumber, label, questionText, sampleSolution, marks, questionType, mcqOptions, mcqCorrectAnswer, questionImageRefs, optionImageRefs}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_RULES} ${TABLE_RULES} ${RENDER_SAFE_LATEX_RULES} Step-by-step working with clear final answer. Remove image commands. Do not merge subparts.`;
 
   const userPrompt = userContent
     .map((item) => (item.type === 'text' ? item.text : ''))
@@ -1527,7 +1551,7 @@ const cleanQuestionBatchWithOpenAi = async (args: {
 
   const completion = await openai.chat.completions.create({
     model: MODEL_NAME,
-    reasoning_effort: 'medium',
+    reasoning_effort: reasoningEffort,
     max_completion_tokens: 10000,
     messages: [
       {
@@ -1716,6 +1740,7 @@ export async function POST(request: Request) {
     const groupingModeRaw = String(formData.get('groupingMode') || 'letter_subpart').trim().toLowerCase();
     const groupingMode: GroupingMode = groupingModeRaw === 'letter_subpart' ? 'letter_subpart' : 'main_question';
     const classifyAfterUpload = parseBoolean(formData.get('classifyAfterUpload'), true);
+    const reasoningEffort = parseReasoningEffort(formData.get('reasoningEffort'), 'high');
     const pollIntervalMs = Math.max(1000, Math.min(60000, normalizePositiveInteger(formData.get('mathpixPollIntervalMs'), 3000)));
     const maxWaitMs = Math.max(10000, Math.min(7200000, normalizePositiveInteger(formData.get('mathpixMaxWaitMs'), 900000)));
 
@@ -1755,7 +1780,7 @@ export async function POST(request: Request) {
     stage = 'split-questions-with-openai';
     const splitCompletion = await openai.chat.completions.create({
       model: MODEL_NAME,
-      reasoning_effort: 'medium',
+      reasoning_effort: reasoningEffort,
       max_completion_tokens: 50000,
       messages: [
         {
@@ -1885,6 +1910,7 @@ export async function POST(request: Request) {
               '- If questionType is written: set mcqOptions to [] and mcqCorrectAnswer to null.',
               '- Include questionImageRefs for each solution so image association is explicit.',
               '- If images are attached, use them for solving but do not describe image content in the output text.',
+              `- ${RENDER_SAFE_LATEX_RULES}`,
               '',
               'Input question blocks LaTeX (in order):',
               ...batch.questions.map((question, idx) => [
@@ -1910,12 +1936,12 @@ export async function POST(request: Request) {
 
         const solveCompletion = await openai.chat.completions.create({
           model: MODEL_NAME,
-          reasoning_effort: 'high',
+          reasoning_effort: reasoningEffort,
           max_completion_tokens: 20000,
           messages: [
             {
               role: 'system',
-              content: `You are cleaning OCR LaTeX exam questions and producing solved outputs. Preserve math meaning. Return JSON only with questionNumber, questionType, formattedQuestionLatex, mcqOptions, mcqCorrectAnswer, solutionLatex. questionType must be exactly "written" or "multiple_choice". For multiple_choice, return all options in mcqOptions and keep formattedQuestionLatex as the stem only with no option lines. For written, return mcqOptions as [] and mcqCorrectAnswer as null. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} If images are provided, do not describe image contents in output text. Use images only to solve. Do not include markdown code fences.`,
+              content: `You are cleaning OCR LaTeX exam questions and producing solved outputs. Preserve math meaning. Return JSON only with questionNumber, questionType, formattedQuestionLatex, mcqOptions, mcqCorrectAnswer, solutionLatex. questionType must be exactly "written" or "multiple_choice". For multiple_choice, return all options in mcqOptions and keep formattedQuestionLatex as the stem only with no option lines. For written, return mcqOptions as [] and mcqCorrectAnswer as null. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${LATEX_RULES} ${TABLE_RULES} ${RENDER_SAFE_LATEX_RULES} If images are provided, do not describe image contents in output text. Use images only to solve. Do not include markdown code fences.`,
             },
             {
               role: 'user',
@@ -2222,6 +2248,7 @@ export async function POST(request: Request) {
         processed: questionBlocks.length,
         groupedBatches: groupedSolveBatches.length,
         groupingMode,
+        reasoningEffort,
         questions: questionBlocks,
         rawChatGptOutput: splitParsed,
       },
@@ -2328,6 +2355,7 @@ export async function POST(request: Request) {
           openai,
           batch,
           imageFiles,
+          reasoningEffort,
         });
         groupedPromptDebug.push(batchCleanResult.debug);
         const solvedQuestions = batchCleanResult.solvedQuestions;
