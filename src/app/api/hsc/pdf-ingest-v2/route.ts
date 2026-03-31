@@ -1338,6 +1338,19 @@ const parseMcqOptionsFromLatex = (latex: string): ParsedMcqOption[] => {
   return parsed;
 };
 
+const mergeOptionImageRef = (args: {
+  label: McqOptionLabel;
+  entryLevelRef: string | null | undefined;
+  optionImageRefs: ReturnType<typeof normalizeOptionImageRefs>;
+  fallbackRef: string | null | undefined;
+}) => {
+  const { label, entryLevelRef, optionImageRefs, fallbackRef } = args;
+  const primary = String(entryLevelRef || '').trim();
+  const fromMap = String(optionImageRefs[label] || '').trim();
+  const fromFallback = String(fallbackRef || '').trim();
+  return primary || fromMap || fromFallback || null;
+};
+
 const formatMathpixMarkdownWithOpenAi = async (args: {
   openai: OpenAI;
   rawMarkdown: string;
@@ -1944,11 +1957,16 @@ export async function POST(request: Request) {
                 const text = sanitizeMcqOptionText(record.text == null ? null : String(record.text));
                 if (!text) return null;
 
-                const optionImageRef = String(record.imageRef || '').trim();
+                const optionImageRef = mergeOptionImageRef({
+                  label,
+                  entryLevelRef: record.imageRef == null ? null : String(record.imageRef),
+                  optionImageRefs: modelOptionImageRefs,
+                  fallbackRef: null,
+                });
                 return {
                   label,
                   text,
-                  imageRef: optionImageRef || modelOptionImageRefs[label] || null,
+                  imageRef: optionImageRef,
                 };
               })
               .filter((entry): entry is ParsedMcqOption => entry !== null)
@@ -1964,7 +1982,12 @@ export async function POST(request: Request) {
         for (const label of ['A', 'B', 'C', 'D'] as const) {
           const fromModelOption = parsedModelMcqOptions.find((option) => option.label === label)?.imageRef || null;
           const fromFallbackOption = fallbackParsedOptions.find((option) => option.label === label)?.imageRef || null;
-          optionRefByLabel.set(label, modelOptionImageRefs[label] || fromModelOption || fromFallbackOption || null);
+          optionRefByLabel.set(label, mergeOptionImageRef({
+            label,
+            entryLevelRef: fromModelOption,
+            optionImageRefs: modelOptionImageRefs,
+            fallbackRef: fromFallbackOption,
+          }));
         }
 
         const formattedQuestionLatex = questionType === 'multiple_choice'
@@ -2151,10 +2174,10 @@ export async function POST(request: Request) {
         mcq_option_b: isMultipleChoice ? (optionByLabel.get('B')?.text || null) : null,
         mcq_option_c: isMultipleChoice ? (optionByLabel.get('C')?.text || null) : null,
         mcq_option_d: isMultipleChoice ? (optionByLabel.get('D')?.text || null) : null,
-        mcq_option_a_image: isMultipleChoice ? (entry.mcqOptionAImage || optionByLabel.get('A')?.imageRef || null) : null,
-        mcq_option_b_image: isMultipleChoice ? (entry.mcqOptionBImage || optionByLabel.get('B')?.imageRef || null) : null,
-        mcq_option_c_image: isMultipleChoice ? (entry.mcqOptionCImage || optionByLabel.get('C')?.imageRef || null) : null,
-        mcq_option_d_image: isMultipleChoice ? (entry.mcqOptionDImage || optionByLabel.get('D')?.imageRef || null) : null,
+        mcq_option_a_image: isMultipleChoice ? entry.mcqOptionAImage : null,
+        mcq_option_b_image: isMultipleChoice ? entry.mcqOptionBImage : null,
+        mcq_option_c_image: isMultipleChoice ? entry.mcqOptionCImage : null,
+        mcq_option_d_image: isMultipleChoice ? entry.mcqOptionDImage : null,
         mcq_correct_answer: isMultipleChoice ? entry.mcqCorrectAnswer : null,
         mcq_explanation: isMultipleChoice ? (cleanedSolution || null) : null,
         graph_image_data: questionImageDataUrls[0] || null,
