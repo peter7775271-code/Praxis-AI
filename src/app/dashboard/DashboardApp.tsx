@@ -381,9 +381,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [showPaperQuestionNavigator, setShowPaperQuestionNavigator] = useState(false);
   const [showQuestionInfo, setShowQuestionInfo] = useState(false);
   const [activePaper, setActivePaper] = useState<{ year: string; subject: string; grade: string; school: string; count: number } | null>(null);
-  const [exportingPaperPdf, setExportingPaperPdf] = useState<'exam' | 'solutions' | null>(null);
-  const [exportingSavedExamPdf, setExportingSavedExamPdf] = useState<'exam' | 'solutions' | null>(null);
-  const [exportingCustomExamPdf, setExportingCustomExamPdf] = useState<'exam' | 'solutions' | null>(null);
+  const [exportingPaperPdf, setExportingPaperPdf] = useState<'exam' | 'solutions' | 'autofix' | null>(null);
+  const [exportingSavedExamPdf, setExportingSavedExamPdf] = useState<'exam' | 'solutions' | 'autofix' | null>(null);
+  const [exportingCustomExamPdf, setExportingCustomExamPdf] = useState<'exam' | 'solutions' | 'autofix' | null>(null);
   const [examEndsAt, setExamEndsAt] = useState<number | null>(null);
   const [examRemainingMs, setExamRemainingMs] = useState<number | null>(null);
   const [examConditionsActive, setExamConditionsActive] = useState(false);
@@ -1330,19 +1330,24 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   }, [allQuestions]);
 
   const availablePapers = useMemo(() => {
-    const map = new Map<string, { year: string; subject: string; grade: string; school: string; count: number }>();
+    const map = new Map<string, { year: string; subject: string; grade: string; school: string; count: number; unspecifiedCount: number }>();
     visibleAllQuestions.forEach((q) => {
       if (!q?.year || !q?.subject || !q?.grade) return;
       const year = String(q.year);
       const subject = String(q.subject);
       const grade = String(q.grade);
       const school = String(q.school_name || 'HSC');
+      const topic = String(q.topic || '').trim().toLowerCase();
+      const isUnspecified = topic === 'unspecified';
       const key = `${year}__${grade}__${subject}__${school}`;
       const existing = map.get(key);
       if (existing) {
         existing.count += 1;
+        if (isUnspecified) {
+          existing.unspecifiedCount += 1;
+        }
       } else {
-        map.set(key, { year, subject, grade, school, count: 1 });
+        map.set(key, { year, subject, grade, school, count: 1, unspecifiedCount: isUnspecified ? 1 : 0 });
       }
     });
 
@@ -2577,12 +2582,14 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     title,
     subtitle,
     downloadName,
+    autoFixExport = false,
   }: {
     includeSolutions: boolean;
     questions: any[];
     title: string;
     subtitle: string;
     downloadName: string;
+    autoFixExport?: boolean;
   }) => {
     if (!questions.length) {
       throw new Error('No questions available to export.');
@@ -2599,6 +2606,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         subtitle,
         downloadName,
         includeSolutions,
+        autoFixExport,
         questions,
       }),
     });
@@ -2630,13 +2638,13 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     URL.revokeObjectURL(url);
   };
 
-  const exportPaperPdf = async (includeSolutions: boolean) => {
+  const exportPaperPdf = async (includeSolutions: boolean, autoFixExport = false) => {
     if (!activePaper || !paperQuestions.length) {
       alert('No paper is loaded to export.');
       return;
     }
 
-    const mode: 'exam' | 'solutions' = includeSolutions ? 'solutions' : 'exam';
+    const mode: 'exam' | 'solutions' | 'autofix' = autoFixExport ? 'autofix' : (includeSolutions ? 'solutions' : 'exam');
     setExportingPaperPdf(mode);
 
     try {
@@ -2646,6 +2654,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
       await exportExamQuestionsPdf({
         includeSolutions,
+        autoFixExport,
         questions: paperQuestions,
         title,
         subtitle,
@@ -2659,7 +2668,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   };
 
-  const exportSavedExamPdf = async (includeSolutions: boolean) => {
+  const exportSavedExamPdf = async (includeSolutions: boolean, autoFixExport = false) => {
     if (!selectedAttempt || selectedAttempt.type !== 'exam') {
       alert('Select a saved exam first.');
       return;
@@ -2674,7 +2683,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       return;
     }
 
-    const mode: 'exam' | 'solutions' = includeSolutions ? 'solutions' : 'exam';
+    const mode: 'exam' | 'solutions' | 'autofix' = autoFixExport ? 'autofix' : (includeSolutions ? 'solutions' : 'exam');
     setExportingSavedExamPdf(mode);
 
     try {
@@ -2684,6 +2693,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
       await exportExamQuestionsPdf({
         includeSolutions,
+        autoFixExport,
         questions,
         title,
         subtitle,
@@ -2697,13 +2707,13 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   };
 
-  const exportCustomExamPdf = async (includeSolutions: boolean) => {
+  const exportCustomExamPdf = async (includeSolutions: boolean, autoFixExport = false) => {
     if (!paperQuestions.length) {
       alert('No custom exam questions are available to export.');
       return;
     }
 
-    const mode: 'exam' | 'solutions' = includeSolutions ? 'solutions' : 'exam';
+    const mode: 'exam' | 'solutions' | 'autofix' = autoFixExport ? 'autofix' : (includeSolutions ? 'solutions' : 'exam');
     setExportingCustomExamPdf(mode);
 
     try {
@@ -2715,6 +2725,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
       await exportExamQuestionsPdf({
         includeSolutions,
+        autoFixExport,
         questions: paperQuestions,
         title,
         subtitle,

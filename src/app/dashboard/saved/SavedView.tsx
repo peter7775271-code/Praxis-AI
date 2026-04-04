@@ -410,6 +410,15 @@ export default function SavedView({
                                 {exportingSavedExamPdf === 'solutions' ? 'Exporting…' : 'Export + Solutions'}
                               </button>
                               <button
+                                onClick={() => exportSavedExamPdf(false, true)}
+                                disabled={exportingSavedExamPdf !== null}
+                                className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                style={{ backgroundColor: '#fffbeb', borderColor: '#f59e0b', color: '#92400e' }}
+                              >
+                                <Download className="w-5 h-5" />
+                                {exportingSavedExamPdf === 'autofix' ? 'Auto-fixing…' : 'Export PDF (Auto-fix LaTeX)'}
+                              </button>
+                              <button
                                 onClick={() => { setSavedExamReviewMode(true); setSavedExamReviewIndex(0); setSavedReviewSidebarCollapsed(false); }}
                                 className="flex items-center gap-2 px-5 py-3 rounded-lg font-medium border cursor-pointer transition-colors"
                                 style={{ backgroundColor: 'var(--clr-surface-a0)', borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-primary-a50)' }}

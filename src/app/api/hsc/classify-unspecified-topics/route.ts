@@ -46,7 +46,7 @@ const RequestSchema = z.object({
     school: z.string().optional(),
   })).optional(),
   questionIds: z.array(z.string().min(1)).optional(),
-  limit: z.number().int().min(1).max(200).default(10),
+  limit: z.number().int().min(1).max(200).optional(),
 });
 
 const openai = new OpenAI({
@@ -289,7 +289,9 @@ export async function POST(request: Request) {
         continue;
       }
 
-      const toProcess = questionIdSet.size > 0 ? unspecifiedQuestions : unspecifiedQuestions.slice(0, limit);
+      const toProcess = questionIdSet.size > 0
+        ? unspecifiedQuestions
+        : (typeof limit === 'number' ? unspecifiedQuestions.slice(0, limit) : unspecifiedQuestions);
       examTotals.processed = toProcess.length;
 
       for (const question of toProcess) {

@@ -242,8 +242,8 @@ export default function CustomExamView({
   examTitle: string;
   examMeta?: string | null;
   questions: CustomExamQuestion[];
-  exportingPdf: 'exam' | 'solutions' | null;
-  onExportPdf: (includeSolutions: boolean) => Promise<void>;
+  exportingPdf: 'exam' | 'solutions' | 'autofix' | null;
+  onExportPdf: (includeSolutions: boolean, autoFixExport?: boolean) => Promise<void>;
   onBack: () => void;
 }) {
   const [showSolutions, setShowSolutions] = React.useState(false);
@@ -322,6 +322,15 @@ export default function CustomExamView({
           >
             <Download className="h-4 w-4" />
             {exportingPdf === 'solutions' ? 'Exporting Solutions PDF…' : 'Export Questions + Solutions PDF'}
+          </button>
+          <button
+            type="button"
+            onClick={() => onExportPdf(false, true)}
+            disabled={exportingPdf !== null || !displayQuestions.length}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-amber-500 bg-amber-50 px-5 py-3 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+          >
+            <Download className="h-4 w-4" />
+            {exportingPdf === 'autofix' ? 'Auto-fixing & Exporting…' : 'Export PDF (Auto-fix LaTeX)'}
           </button>
         </div>
 

@@ -1145,6 +1145,19 @@ export default function PaperView({
                                   <Download className="w-4 h-4" />
                                   {exportingPaperPdf === 'solutions' ? 'Exporting Solutions PDF…' : 'Export Exam + Solutions PDF'}
                                 </button>
+                                <button
+                                  onClick={() => exportPaperPdf(false, true)}
+                                  disabled={exportingPaperPdf !== null}
+                                  className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                  style={{
+                                    backgroundColor: '#fffbeb',
+                                    color: '#92400e',
+                                    border: '1px solid #f59e0b',
+                                  }}
+                                >
+                                  <Download className="w-4 h-4" />
+                                  {exportingPaperPdf === 'autofix' ? 'Auto-fixing & Exporting…' : 'Export Exam PDF (Auto-fix LaTeX)'}
+                                </button>
                               </>
                             )}
                           </div>

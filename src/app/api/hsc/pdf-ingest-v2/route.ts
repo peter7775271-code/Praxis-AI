@@ -172,21 +172,29 @@ const CRITICAL_SPLITTING_RULE = [
   '- So "Question 11 (a)" with parts (i) and (ii) becomes two blocks: QUESTION_NUMBER 11 (a)(i) and QUESTION_NUMBER 11 (a)(ii), each with its own QUESTION_CONTENT and SAMPLE_ANSWER.',
 ].join(' ');
 const MCQ_RULES = 'For MCQ: keep options only in mcqOptions array. Remove option lines from questionText. Do not use display math delimiters in option text.';
-const LATEX_RULES = 'All mathematics must have explicit delimiters: $...$ for inline, \\[...\\] for display. Do not output plain-text math like "1/2 + 1/x^2 - 5" outside math mode.';
-const TABLE_RULES = 'For tables: Do NOT use \\begin{table}...\\end{table} floating environments. Instead, output tables using only \\begin{center}\\begin{tabular}{...}...\\end{tabular}\\end{center} for inline rendering. Remove \\caption, \\captionsetup, and other table metadata commands.';
-const RENDER_SAFE_LATEX_RULES = [
-  'Render-safe LaTeX rules (must follow exactly):',
-  '- Return valid LaTeX fragments only, never markdown fences or prose wrappers.',
-  '- Use only compile-safe commands and standard math environments; avoid custom macros and package-specific commands.',
-  '- Do not emit table/figure floats: never use \\begin{table}, \\end{table}, \\begin{figure}, \\end{figure}, \\caption, or \\captionsetup.',
-  '- If a table is needed, use only \\begin{center}\\begin{tabular}{...}...\\end{tabular}\\end{center}.',
-  '- Never emit image commands or markdown images: no \\includegraphics, \\graphicspath, or ![](...).',
-  '- Always keep math delimiters balanced and non-nested incorrectly: inline \\(...\\) or $...$, display \\[...\\], and avoid mixing inline delimiters inside display math.',
-  '- Keep all environments balanced with matching \\begin{...}/\\end{...} and preserve valid row separators in matrix/array/cases/tabular blocks.',
-  '- Do not output stray backslashes or fake commands (for example writing words as \\Word). Use plain text for normal words.',
-  '- Use escaped ampersands \\& in normal prose; use unescaped & only for alignment/table columns.',
-  '- Do not emit malformed \\left/\\right pairs. If one side is intentionally absent, use \\left. or \\right..',
-  '- Do not emit empty placeholders or unfinished expressions; every question and solution must be complete and compilable.',
+const LATEX_OUTPUT_RULES = [
+  'LATEX OUTPUT RULES FOR EDUREPO PDF EXPORT (mandatory):',
+  '## Math delimiters: Use \\( ... \\) for ALL inline math. Use \\[ ... \\] for ALL display/block math. Every \\( must have a matching \\). Every \\[ must have a matching \\]. Never nest math delimiters. Never place \\( ... \\) inside \\[ ... \\].',
+  '## Sample solution formatting: In sampleSolution and solutionLatex, prefer display math with \\[ ... \\] for worked equations, derivations, and final displayed answers so the rendered solution is visually clean. Use \\( ... \\) only for short inline math inside prose.',
+  '## Fractions: Always use \\frac{numerator}{denominator}. Never write a/b for mathematical fractions. Never write \\dfrac — use \\frac only. Both arguments to \\frac must be wrapped in braces: \\frac{x}{y} not \\frac xy.',
+  '## Superscripts and subscripts: Always use braces for multi-character exponents: x^{10} not x^10. Always use braces for multi-character subscripts: a_{n+1} not a_n+1.',
+  '## Matrices: Use \\begin{pmatrix}...\\end{pmatrix} for parenthesised matrices. Row separator is \\\\ (double backslash). Column separator is & (single ampersand). Never use & outside of matrix/align/tabular.',
+  '## Align environments: Use \\begin{align*}...\\end{align*} for multi-line working. Each line must end with \\\\ except the last. Use & to mark the alignment point (typically before =). Never use & outside of align, array, tabular, matrix, or cases environments.',
+  '## Cases/piecewise functions: Use \\begin{cases}...\\end{cases}. Format: expression & condition \\\\ on each row.',
+  '## Cases + display delimiters (critical): When a cases block is followed by extra math text (for example \\text{for } t \\in (-\\infty,\\infty)), keep everything inside one display block and close display math exactly once at the end. Valid pattern: \\[ \\begin{cases} ... \\end{cases} \\quad \\text{for } t \\in (-\\infty,\\infty) \\]. Invalid pattern: \\begin{cases} ... \\end{cases} \\] ... \\in ... \\]. Also, inside cases, separate rows with \\\\ (never a single backslash).',
+  '## Commands with backslashes: Greek letters (\\alpha \\beta \\gamma \\delta \\theta \\lambda \\mu \\sigma \\phi \\omega \\pi), Capital Greek (\\Delta \\Sigma \\Omega), Operators (\\sin \\cos \\tan \\sec \\cot \\ln \\log \\exp \\lim \\to \\Rightarrow \\approx \\times \\div). For cosecant: write \\operatorname{cosec}, never bare cosec.',
+  '## Forbidden patterns: Never write \\dfrac, beginaligned, or endaligned. Never write \\left[ without \\right] (same for \\left\\{, \\left()). Never use bare % (write \\% for percent). Never use bare & outside alignment environments. Never use bare _ outside math mode (write \\_ in prose). Never use \\begin{figure}, \\begin{table}, \\includegraphics. Never write \\textbackslash{} inside math mode.',
+  '## Tables: Use only \\begin{center}\\begin{tabular}{...}...\\end{tabular}\\end{center}. Never use \\begin{table}, \\caption, \\captionsetup, or floating environments.',
+  '## Braces: Every { must have a matching }. Never leave \\frac, \\sqrt, \\text, \\mathbf, etc. without closing braces.',
+  '## Text inside math: Use \\text{word} inside \\( \\) or \\[ \\]. Example: \\( x = 5 \\text{ units} \\)',
+  '## Output hygiene for DB storage: formattedQuestionLatex and solutionLatex must be clean LaTeX text, not escaped artifacts. Do NOT output literal tokens like \\\\n, \\\\r, or \\\\t. Do NOT include newline characters in final field values; use spaces instead. Do NOT double-escape LaTeX commands: in final content use single-backslash LaTeX commands (e.g. \\(, \\frac, \\Rightarrow), not doubly escaped forms like \\\\( or \\\\frac unless it is an intentional LaTeX line break \\\\.',
+  '## Solution formatting contract (critical): solutionLatex must be human-readable, clean, and directly compilable in the export route. Use clear prose and valid math blocks, but return the final field value as a single line (spaces only, no newline characters). Never emit JSON-escaped LaTeX fragments such as "\\n", "\\\\n", or "\\\\(".',
+  '## Display math safety: Never output consecutive display-open delimiters (e.g. \\[ immediately followed by another \\[). Every display open must have exactly one matching close in order. Do not place prose text inside an unclosed display block.',
+  '## Display math with cases (critical): For piecewise forms, write exactly one display wrapper around the whole block, e.g. \\[ y = \\begin{cases} ... \\end{cases} \\]. Never write nested display openers such as "\\[ y = \\[".',
+  '## Escaping safety (critical): Emit standard LaTeX commands with a single leading backslash (\\frac, \\pi, \\le, \\begin, \\end). Never emit over-escaped commands such as \\\\frac, \\\\pi, or \\\\le in field content.',
+  '## align* safety: If using align*, each non-final row ends with \\\\ and the final row does not require \\\\. Never use a single backslash as a row break. Never place raw prose lines inside align*.',
+  '## cases safety: If using cases, keep it in math mode (typically \\[\\begin{cases}...\\end{cases}\\]). Left-column labels like negative/positive/zero must be plain text via \\text{negative}, \\text{positive}, \\text{zero}, not pseudo-commands like \\negative.',
+  '## General: Write LaTeX fragments only — no \\documentclass, \\begin{document}, \\usepackage, or preamble. No custom macros or \\newcommand definitions. No \\label, \\ref, \\tag, or equation numbering. All content must compile with pdflatex using only standard AMS packages.',
 ].join(' ');
 
 const classifyIngestError = (message: string) => {
@@ -1084,7 +1092,11 @@ const isHexChar = (char: string) => /[0-9a-f]/i.test(char);
 const escapeInvalidBackslashesInJsonStrings = (jsonText: string) => {
   let output = '';
   let inString = false;
-  const validSimpleEscapes = new Set(['"', '\\', '/', 'b', 'f', 'n', 'r', 't']);
+  const validSimpleEscapes = new Set(['"', '\\', '/']);
+  // LaTeX command letters that often appear after backslash. When we see \[letter],
+  // treat it as a potential LaTeX command, not a JSON escape sequence (especially
+  // \b, \f, \n, \r, \t which conflict with JSON escape sequences).
+  const latexCommandLetters = /[a-zA-Z]/;
 
   const escapeControlChar = (char: string) => {
     if (char === '\n') return '\\n';
@@ -1117,9 +1129,18 @@ const escapeInvalidBackslashesInJsonStrings = (jsonText: string) => {
         continue;
       }
 
+      // Only treat as valid JSON escape if it's truly a JSON escape (", \, /)
+      // or the next character is not a LaTeX command letter.
       if (validSimpleEscapes.has(next)) {
         output += `\\${next}`;
         i += 1;
+        continue;
+      }
+
+      // If next char is a LaTeX command letter (a-z, A-Z), treat backslash as literal LaTeX.
+      if (latexCommandLetters.test(next)) {
+        // Double-escape the backslash so JSON.parse preserves it as a single backslash.
+        output += '\\\\';
         continue;
       }
 
@@ -1270,12 +1291,51 @@ const lineHasMathDelimiters = (line: string) => {
   return /\\\(|\\\[|\$|\\begin\{(?:equation|align\*?|gather\*?|cases|array|matrix|pmatrix|bmatrix|vmatrix|Vmatrix)\}/.test(line);
 };
 
+const decodeEscapedNewlineTokens = (value: string) =>
+  String(value || '')
+    // Decode explicit double-escaped newlines first.
+    .replace(/\\\\n/g, '\n')
+    // Decode single escaped newline markers, but avoid LaTeX commands like \noindent.
+    .replace(/\\n(?![a-zA-Z])/g, '\n')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\r(?![a-zA-Z])/g, '\n');
+
+const unwrapDisplayMathAroundBlockLevelEnv = (value: string) => {
+  let result = String(value || '');
+
+  // Remove \[ ... \] wrappers around block-level environments such as align/cases.
+  result = result.replace(/\\\[\s*(\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\})\s*\\\]/g, '$1');
+  // Remove $$ ... $$ wrappers around block-level environments.
+  result = result.replace(/\$\$\s*(\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\})\s*\$\$/g, '$1');
+
+  return result;
+};
+
+const wrapBareDisplayBlockEnvironments = (value: string) => {
+  const source = String(value || '');
+  const bareDisplayBlockPattern = /\\begin\{(?:aligned|alignedat|gathered|split)\}[\s\S]*?\\end\{(?:aligned|alignedat|gathered|split)\}/g;
+
+  return source.replace(bareDisplayBlockPattern, (match, _ignored, offset) => {
+    const before = source.slice(0, offset);
+    if (/\\\[\s*$/.test(before) || /\$\$\s*$/.test(before)) {
+      return match;
+    }
+
+    return `\\[${match}\\]`;
+  });
+};
+
+const normalizeLatexForStorage = (value: string) =>
+  unwrapDisplayMathAroundBlockLevelEnv(
+    decodeEscapedNewlineTokens(String(value || ''))
+      .replace(/\\\\\(/g, '\\(')
+      .replace(/\\\\\)/g, '\\)')
+      .replace(/\\\\\[/g, '\\[')
+      .replace(/\\\\\]/g, '\\]')
+  );
+
 const enforceLatexMathFormatting = (value: string) => {
-  const source = String(value || '')
-    .replace(/\\\\\(/g, '\\(')
-    .replace(/\\\\\)/g, '\\)')
-    .replace(/\\\\\[/g, '\\[')
-    .replace(/\\\\\]/g, '\\]');
+  const source = normalizeLatexForStorage(value);
 
   const lines = source.split(/\r?\n/).map((line) => {
     if (!line.trim() || lineHasMathDelimiters(line)) return line;
@@ -1310,6 +1370,20 @@ const enforceLatexMathFormatting = (value: string) => {
 
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 };
+
+const sanitizeLatexForStorage = (value: string) =>
+  wrapBareDisplayBlockEnvironments(enforceLatexMathFormatting(String(value || '')))
+    // Remove escaped control-token artifacts from model/JSON output.
+    .replace(/\\\\[nrt]/g, ' ')
+    // Remove single-escaped control tokens when they clearly act as separators in prose.
+    // This avoids mutating valid commands such as \neq.
+    .replace(/\\n(?=\s|$|[A-Z])/g, ' ')
+    .replace(/\\r(?=\s|$|[A-Z])/g, ' ')
+    .replace(/\\t(?=\s|$|[A-Z])/g, ' ')
+    // Store as single-line LaTeX so serialized JSON does not contain newline escapes.
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 
 const sanitizeMcqOptionText = (value: string | null | undefined) => {
   const source = String(value || '').trim();
@@ -1458,6 +1532,7 @@ const cleanQuestionWithOpenAi = async (args: {
         `Q${question.index}: ${question.label}`,
         'Return JSON: {questionText, sampleSolution, marks, questionType, mcqOptions, mcqCorrectAnswer, questionImageRefs, optionImageRefs}',
         'MCQ: stem only in questionText (no A-D lines), options as mcqOptions array. Estimate marks 1-5.',
+        'sampleSolution should be step-by-step and should use display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability.',
         '',
         question.latex,
       ].join('\n'),
@@ -1478,7 +1553,7 @@ const cleanQuestionWithOpenAi = async (args: {
     messages: [
       {
         role: 'system',
-        content: `Clean OCR exam content. JSON only, no markdown. Remove \\includegraphics. Concise LaTeX. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_RULES} ${TABLE_RULES} ${RENDER_SAFE_LATEX_RULES} Written answers: step-by-step with clear final answer, blank lines between steps. questionType written|multiple_choice. Estimate marks 1-15. Reference MathPix image names in questionImageRefs/optionImageRefs keys.`,
+        content: `Clean OCR exam content. JSON only, no markdown. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_OUTPUT_RULES} Written answers: step-by-step with clear final answer, blank lines between steps. questionType written|multiple_choice. Estimate marks 1-15. Reference MathPix image names in questionImageRefs/optionImageRefs keys.`,
       },
       {
         role: 'user',
@@ -1555,7 +1630,7 @@ const cleanQuestionBatchWithOpenAi = async (args: {
     },
   ];
 
-  const systemPrompt = `Solve OCR-extracted exam questions. Output JSON only with key "solutions" containing array of {questionNumber, label, questionText, sampleSolution, marks, questionType, mcqOptions, mcqCorrectAnswer, questionImageRefs, optionImageRefs}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_RULES} ${TABLE_RULES} ${RENDER_SAFE_LATEX_RULES} Step-by-step working with clear final answer. Remove image commands. Do not merge subparts.`;
+  const systemPrompt = `Solve OCR-extracted exam questions. Output JSON only with key "solutions" containing array of {questionNumber, label, questionText, sampleSolution, marks, questionType, mcqOptions, mcqCorrectAnswer, questionImageRefs, optionImageRefs}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_OUTPUT_RULES} Step-by-step working with clear final answer. In sampleSolution, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability. Do not merge subparts.`;
 
   const userPrompt = userContent
     .map((item) => (item.type === 'text' ? item.text : ''))
@@ -1914,7 +1989,12 @@ export async function POST(request: Request) {
               '- For MCQ option images, include per-option image refs in optionImageRefs and/or each mcqOptions[].imageRef.',
               '- Include questionImageRefs for each solution so image association is explicit.',
               '- If images are attached, use them for solving but do not describe image content in the output text.',
-              `- ${RENDER_SAFE_LATEX_RULES}`,
+              '- In sampleSolution, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability.',
+              '- solutionLatex must be readable and compile-safe, but the final field value must be a single line (spaces only; no newline characters).',
+              '- Never emit escaped artifact tokens like literal \\n, \\r, \\t, \\\\n, \\\\(, or \\\\].',
+              '- Never emit repeated display-open delimiters like \\[ followed by another \\[.',
+              '- In align* blocks, use proper row breaks (\\\\) and do not include raw prose lines inside the environment.',
+              `- ${LATEX_OUTPUT_RULES}`,
               '',
               'Input question LaTeX:',
               sourceQuestion.latex,
@@ -1942,7 +2022,7 @@ export async function POST(request: Request) {
           messages: [
             {
               role: 'system',
-              content: `You are cleaning OCR LaTeX exam questions and producing solved outputs. Preserve math meaning. Return JSON only with questionNumber, questionType, formattedQuestionLatex, mcqOptions, optionImageRefs, questionImageRefs, mcqCorrectAnswer, solutionLatex. questionType must be exactly "written" or "multiple_choice". For multiple_choice, return all options in mcqOptions and keep formattedQuestionLatex as the stem only with no option lines. For written, return mcqOptions as [] and mcqCorrectAnswer as null. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} If images are provided, do not describe image contents in output text. Use images only to solve. Do not include markdown code fences.`,
+              content: `You are cleaning OCR LaTeX exam questions and producing solved outputs. Preserve math meaning. Return JSON only with questionNumber, questionType, formattedQuestionLatex, mcqOptions, optionImageRefs, questionImageRefs, mcqCorrectAnswer, solutionLatex. questionType must be exactly "written" or "multiple_choice". For multiple_choice, return all options in mcqOptions and keep formattedQuestionLatex as the stem only with no option lines. For written, return mcqOptions as [] and mcqCorrectAnswer as null. formattedQuestionLatex and solutionLatex must not contain escaped artifact tokens like literal \\n, \\r, \\t, \\\\n, or doubled command escapes. Emit clean LaTeX content as single-line field values (spaces only; no newline characters). In solutionLatex, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability. solutionLatex must be readable and compile-safe: valid delimiters, no repeated display-open delimiters, valid align* row breaks, and cases labels as \\text{...}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} If images are provided, do not describe image contents in output text. Use images only to solve. Do not include markdown code fences.`,
             },
             {
               role: 'user',
@@ -1998,7 +2078,7 @@ export async function POST(request: Request) {
               .filter((entry): entry is ParsedMcqOption => entry !== null)
           : [];
 
-        const formattedQuestionStem = String(solveParsed.formattedQuestionLatex || '').trim();
+        const formattedQuestionStem = sanitizeLatexForStorage(String(solveParsed.formattedQuestionLatex || '').trim());
         const fallbackParsedOptions = parseMcqOptionsFromLatex(formattedQuestionStem);
         const mcqOptions = questionType === 'multiple_choice'
           ? (parsedModelMcqOptions.length ? parsedModelMcqOptions : fallbackParsedOptions)
@@ -2024,7 +2104,7 @@ export async function POST(request: Request) {
         const mcqCorrectAnswer = questionType === 'multiple_choice' && ['A', 'B', 'C', 'D'].includes(mcqCorrectAnswerRaw)
           ? (mcqCorrectAnswerRaw as 'A' | 'B' | 'C' | 'D')
           : null;
-        const solutionLatex = String(solveParsed.solutionLatex || '').trim();
+        const solutionLatex = sanitizeLatexForStorage(String(solveParsed.solutionLatex || '').trim());
 
         if (!formattedQuestionLatex || !solutionLatex) {
           throw new Error('Solve output missing formattedQuestionLatex or solutionLatex');
@@ -2175,8 +2255,8 @@ export async function POST(request: Request) {
     const insertPayload = uploadableSolvedBlocks.map((entry) => {
       const optionByLabel = new Map(entry.mcqOptions.map((option) => [option.label, option]));
       const isMultipleChoice = entry.questionType === 'multiple_choice';
-      const cleanedQuestionText = enforceLatexMathFormatting(stripEmbeddedImageCommands(entry.formattedQuestionLatex));
-      const cleanedSolution = enforceLatexMathFormatting(stripEmbeddedImageCommands(entry.solutionLatex));
+      const cleanedQuestionText = sanitizeLatexForStorage(stripEmbeddedImageCommands(entry.formattedQuestionLatex));
+      const cleanedSolution = sanitizeLatexForStorage(stripEmbeddedImageCommands(entry.solutionLatex));
 
       const imageSharingGroupKey = getImageSharingGroupKey(entry.questionNumber);
       const shouldAttachQuestionImages = !imageSharingGroupKey ||

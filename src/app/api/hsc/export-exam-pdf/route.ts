@@ -4,6 +4,7 @@ import { constants } from 'fs';
 import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
+import OpenAI from 'openai';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +20,37 @@ const MAX_GET_TEX_LENGTH = Number(process.env.MAX_GET_TEX_LENGTH ?? 1800);
 const ENABLE_PLAIN_TEXT_PDF_FALLBACK = String(process.env.ENABLE_PLAIN_TEXT_PDF_FALLBACK ?? '').toLowerCase() === 'true';
 const LOCAL_TEX_FILENAME = 'exam.tex';
 const LOCAL_PDFLATEX_MISSING_SENTINEL = 'LOCAL_PDFLATEX_MISSING';
+const ENABLE_EXPORT_PDF_AUTO_REWRITE = String(process.env.ENABLE_EXPORT_PDF_AUTO_REWRITE ?? 'true').toLowerCase() !== 'false';
+const EXPORT_PDF_REWRITE_MODEL = process.env.EXPORT_PDF_REWRITE_MODEL ?? 'gpt-5.4';
+const MAX_AUTO_REWRITE_QUESTIONS = Math.max(
+  1,
+  Math.min(50, Number.parseInt(process.env.MAX_AUTO_REWRITE_QUESTIONS || '8', 10) || 8)
+);
+
+type CompilerKind = 'local' | 'remote';
+
+type CompileFailureDetails = {
+  attemptLabel: string;
+  compiler: CompilerKind;
+  message: string;
+  tex: string;
+  lineNumber: number | null;
+  texContext: string;
+  diagnostic: string;
+  rawLog: string;
+  rawStdout: string;
+  rawStderr: string;
+};
+
+class PdfCompileError extends Error {
+  details: CompileFailureDetails;
+
+  constructor(details: CompileFailureDetails) {
+    super(details.message || 'PDF compile failed');
+    this.name = 'PdfCompileError';
+    this.details = details;
+  }
+}
 
 type ExportQuestion = {
   question_number?: string | null;
@@ -68,7 +100,35 @@ const decodeEscapedNewlineTokens = (value: string) =>
     // This avoids corrupting commands like \neq or \noindent.
     .replace(/\\n(?![a-z])/g, '\n')
     .replace(/\\r\\n/g, '\n')
-    .replace(/\\r(?![a-z])/g, '\n');
+    .replace(/\\r(?![a-z])/g, '\n')
+    // Handle common artifact: math/text delimiter immediately followed by literal \n
+    // e.g. "\\]\\nfor" or "\\)\\nHence".
+    .replace(/(\\\]|\\\)|\$\$|[.!?:;])\\n(?=[A-Za-z])/g, '$1\n');
+
+const collapseDuplicateDisplayMathDelimiters = (value: string) =>
+  String(value || '')
+    // Collapse malformed nested opener with a leading expression, e.g. "\\[ y = \\[".
+    .replace(/\\\[\s*([^\\\n][^\n]{0,120}?)\s*=\s*\\\[\s*/g, (_m, lhs) => `\\[ ${String(lhs).trim()} = `)
+    // Also collapse any direct nested opener regardless of LHS text shape.
+    .replace(/\\\[\s*\\\[/g, '\\[')
+    // Collapse repeated display-open delimiters like "\\[\\n\\[".
+    .replace(/(?:\\\[\s*){2,}/g, '\\[\n')
+    // Collapse repeated display-close delimiters like "\\]\\n\\]".
+    .replace(/(?:\s*\\\]){2,}/g, '\n\\]');
+
+  const OVER_ESCAPED_COMMAND_PREFIX = '(?:frac|dfrac|sqrt|pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega|Delta|Sigma|Omega|leq|geq|neq|Rightarrow|leftrightarrow|to|times|div|pm|mp|sin|cos|tan|sec|cosec|cot|log|ln|exp|lim|vec|overrightarrow|overleftarrow|left|right|begin|end|text|operatorname|ensuremath)';
+
+  const collapseOverEscapedDelimiters = (value: string) =>
+    String(value || '').replace(/\\{2,}([\[\]\(\)])/g, (match, delimiter, offset, source) => {
+      // Preserve line-break form \\[<length>] (e.g. \\[6pt]) used in cases/align rows.
+      if (delimiter === '[') {
+        const after = String(source || '').slice(Number(offset) + String(match).length);
+        if (/^\s*-?[0-9]+(?:\.[0-9]+)?\s*(?:pt|mm|cm|in|ex|em|bp|pc|dd|cc|sp)\s*\]/i.test(after)) {
+          return '\\\\[';
+        }
+      }
+      return `\\${delimiter}`;
+    });
 
 const normalizeEscapedLatexArtifacts = (value: string) =>
   decodeEscapedNewlineTokens(value)
@@ -78,8 +138,12 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
     // Recover JSON-escaped inline math delimiters that arrive as \\( and \\).
     .replace(/\\\\\(/g, '\\(')
     .replace(/\\\\\)/g, '\\)')
-    .replace(/\\\\\[/g, '\\[')
+    // Do not collapse row-break syntax like \\[6pt] inside align/cases.
+    .replace(/\\\\\[(?!\s*-?[0-9]+(?:\.[0-9]+)?\s*(?:pt|mm|cm|in|ex|em|bp|pc|dd|cc|sp)\s*\])/gi, '\\[')
     .replace(/\\\\\]/g, '\\]')
+    // Normalize over-escaped commands like \\\frac or \\\pi to single-backslash commands.
+    // Keep true row breaks (e.g. "\\k" inside matrices) intact.
+    .replace(new RegExp(`\\\\{2,}(?=${OVER_ESCAPED_COMMAND_PREFIX}\\b)`, 'g'), '\\')
     // OCR/model output may emit prose words as fake commands right after display math,
     // e.g. "\\]\\Let". Convert those to plain text and keep a safe line break.
     .replace(/(\\\]|\\\)|\$\$)\s*\\([A-Z][a-z]{2,})\b/g, (_match, closer, word) => `${closer}\n${word}`)
@@ -148,6 +212,9 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
     // Drop stray backslashes that are not starting a command/escape and can crash pdflatex.
     .replace(/\\(?![A-Za-z]+|[%$&#_{}~^\\()\[\],;:! ])/g, '');
 
+const normalizeEscapedLatexArtifactsSafe = (value: string) =>
+  collapseOverEscapedDelimiters(normalizeEscapedLatexArtifacts(value));
+
 const unwrapInlineMathInsideDisplayMath = (value: string) =>
   String(value || '')
     .replace(/\\\[([\s\S]*?)\\\]/g, (_match, body) => {
@@ -158,6 +225,112 @@ const unwrapInlineMathInsideDisplayMath = (value: string) =>
       const normalizedBody = String(body || '').replace(/\\\(([\s\S]*?)\\\)/g, '$1');
       return `$$${normalizedBody}$$`;
     });
+
+const unwrapDisplayMathAroundBlockLevelEnv = (value: string) => {
+  // Remove outer display-math wrappers only for environments that are already
+  // full display math environments by themselves. Do NOT unwrap environments
+  // like cases/matrix/aligned that still require math mode wrappers.
+  let result = String(value || '');
+
+  const STANDALONE_DISPLAY_ENVS = new Set([
+    'equation', 'equation*',
+    'align', 'align*',
+    'alignat', 'alignat*',
+    'gather', 'gather*',
+    'multline', 'multline*',
+    'flalign', 'flalign*',
+  ]);
+
+  // Remove \[...\] only when wrapping one standalone display environment.
+  result = result.replace(/\\\[\s*(\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\2\})\s*\\\]/g, (_match, body, env) => {
+    return STANDALONE_DISPLAY_ENVS.has(String(env || '').trim()) ? body : _match;
+  });
+
+  // Remove $$...$$ only when wrapping one standalone display environment.
+  result = result.replace(/\$\$\s*(\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\2\})\s*\$\$/g, (_match, body, env) => {
+    return STANDALONE_DISPLAY_ENVS.has(String(env || '').trim()) ? body : _match;
+  });
+
+  return result;
+};
+
+const normalizeCasesTextLabels = (value: string) =>
+  String(value || '').replace(
+    /\\begin\{(cases|dcases|rcases|drcases)\}([\s\S]*?)\\end\{\1\}/g,
+    (_match, env: string, body: string) => {
+      const repaired = String(body || '')
+        // OCR/model outputs sometimes emit pseudo-commands like \negative or \\negative.
+        .replace(/\\+(negative|positive|zero|undefined|defined)\b/gi, (_token, label) => `\\text{${String(label).toLowerCase()}}`);
+      return `\\begin{${env}}${repaired}\\end{${env}}`;
+    }
+  );
+
+const wrapBareCasesBlocksOutsideMath = (value: string) =>
+  String(value || '').replace(
+    /\\begin\{(cases|dcases|rcases|drcases)\}[\s\S]*?\\end\{\1\}/g,
+    (block, offset, source) => {
+      const src = String(source || '');
+      const start = Number(offset) || 0;
+      const before = src.slice(0, start).trimEnd();
+      const after = src.slice(start + block.length).trimStart();
+
+      // If already explicitly wrapped, keep as-is.
+      if (before.endsWith('\\[') && after.startsWith('\\]')) return block;
+      if (before.endsWith('$$') && after.startsWith('$$')) return block;
+      if (before.endsWith('\\(') && after.startsWith('\\)')) return block;
+
+      // If there is an unclosed display opener immediately before this cases block
+      // (e.g. "... y = \\["), keep block as-is to avoid creating "\\[ ... \\[".
+      const recentBefore = before.slice(Math.max(0, before.length - 400));
+      const openCount = (recentBefore.match(/\\\[/g) || []).length;
+      const closeCount = (recentBefore.match(/\\\]/g) || []).length;
+      if (openCount > closeCount) return block;
+
+      // Fallback parser check for normal cases.
+      if (isInsideMathAt(src, start)) return block;
+
+      return `\\[\n${block}\n\\]`;
+    }
+  );
+
+const collapseNestedDisplayOpenersBeforeCases = (value: string) =>
+  String(value || '')
+    // Handle the common broken pattern: "\\[ y = \\[\n\\begin{cases}"
+    .replace(/\\\[\s*([A-Za-z0-9(){}\\\s+\-*/.^|]+?)\s*=\s*\\\[\s*(?=\\begin\{(?:cases|dcases|rcases|drcases)\})/g, (_m, lhs) => {
+      return `\\[ ${String(lhs).trim()} = `;
+    })
+    // Fallback: collapse direct nested openers right before a cases block.
+    .replace(/\\\[\s*\\\[\s*(?=\\begin\{(?:cases|dcases|rcases|drcases)\})/g, '\\[');
+
+const repairTrailingForClauseOutsideDisplayMath = (value: string) =>
+  String(value || '').replace(
+    /\\+\](?:\s|\\n|\\r)*\\+quad(?:\s|\\n|\\r)*((?:\\+text(?:\s|\\n|\\r)*\{(?:\s|\\n|\\r)*for(?:\s|\\n|\\r)*\}|for)(?:\s|\\n|\\r)+[\s\S]{1,220}?)(?:\s|\\n|\\r)*\\+\]/g,
+    (_match, clause) => {
+      const normalizedClause = String(clause || '')
+        .replace(/^(?:\\+text\s*\{\s*for\s*\}|for)\s+/i, '\\text{for } ')
+        .trim();
+      return ` \\quad ${normalizedClause} \\]`;
+    }
+  );
+
+const finalizeCasesSafety = (value: string) =>
+  collapseDuplicateDisplayMathDelimiters(
+    repairTrailingForClauseOutsideDisplayMath(
+      collapseNestedDisplayOpenersBeforeCases(
+        wrapBareCasesBlocksOutsideMath(normalizeCasesTextLabels(String(value || '')))
+      )
+    )
+  );
+
+const normalizeLatexForPdfEmission = (value: string) =>
+  collapseOverEscapedDelimiters(String(value || ''))
+    // Reduce over-escaped commands/delimiters to single-backslash forms.
+    .replace(new RegExp(`\\\\{2,}(?=${OVER_ESCAPED_COMMAND_PREFIX}\\b)`, 'g'), '\\')
+    // Final safety: collapse nested display-openers around cases blocks.
+    .replace(/\\\[\s*([^\\\n][^\n]{0,160}?)\s*=\s*\\\[\s*(?=\\begin\{(?:cases|dcases|rcases|drcases)\})/g, (_m, lhs) => {
+      return `\\[ ${String(lhs).trim()} = `;
+    })
+    .replace(/\\\[\s*\\\[\s*(?=\\begin\{(?:cases|dcases|rcases|drcases)\})/g, '\\[');
 
 const normalizeGreekWordTokens = (value: string) =>
   String(value || '')
@@ -292,12 +465,32 @@ const repairCasesRowSeparators = (value: string) =>
     }
   );
 
+/** Inside align-like environments, repair lone row-ending backslashes to \\ and unwrap inline \( ... \). */
+const repairAlignRowSeparators = (value: string) =>
+  value.replace(
+    /(\\begin\{(align\*?|alignat\*?|alignedat\*?|aligned|flalign\*?|gather\*?|multline\*?)\}(?:\{[^}]*\})?)([\s\S]*?)(\\end\{\2\})/g,
+    (_match, beginTag: string, _env: string, body: string, endTag: string) => {
+      const repaired = String(body || '')
+        // align* is already math mode; inline delimiters inside it cause delimiter errors.
+        .replace(/\\\(([\s\S]*?)\\\)/g, '$1')
+        // Common OCR/model breakage: a single trailing backslash before newline.
+        .replace(/(^|[^\\])\\(?=\s*\n)/gm, (rowMatch) => `${rowMatch.slice(0, -1)}\\\\`)
+        // Also repair single row-ending backslashes before a following aligned entry (contains &).
+        .replace(/(^|[^\\])\\(?=\s*[^\n]*&)/gm, (rowMatch) => `${rowMatch.slice(0, -1)}\\\\`);
+      return `${beginTag}${repaired}${endTag}`;
+    }
+  );
+
 const wrapParenthesizedMathLikeSegments = (value: string) =>
-  value.replace(/(^|[\s,:;])\(([^()\n]*\\(?:d?frac|sqrt)[^()\n]*)\)/g, (_match, prefix, expr) => {
+  value.replace(/(^|[\s,:;])\(([^()\n]*\\(?:d?frac|sqrt)[^()\n]*)\)/g, (_match, prefix, expr, offset) => {
     const candidate = String(expr || '').trim();
     if (!candidate) return _match;
     // Avoid nesting delimiters like \( ... $...$ ... \), which breaks pdflatex.
     if (/\$|\\\(|\\\)|\\\[|\\\]/.test(candidate)) return _match;
+    // Don't wrap if already inside a display math environment
+    // offset points to match start (prefix), so advance to the opening parenthesis.
+    const parenPos = offset + prefix.length;
+    if (isInsideMathAt(value, parenPos)) return _match;
     return `${prefix}\\(${candidate}\\)`;
   });
 
@@ -451,14 +644,19 @@ const normalizeLatexBody = (value: string) =>
       wrapBareBoxedOutsideMath(
     escapeAmpersandsOutsideAlignment(
       wrapParenthesizedMathLikeSegments(
+        wrapBareCasesBlocksOutsideMath(
+        normalizeCasesTextLabels(
+        unwrapDisplayMathAroundBlockLevelEnv(
         unwrapInlineMathInsideDisplayMath(
         sanitizeMisplacedTableRules(
           normalizeMalformedPiecewiseBlocks(
           repairCasesRowSeparators(
+          repairAlignRowSeparators(
           repairTableRowSeparators(
             repairMatrixRowSeparators(
-              convertPlainAmpersandTables(normalizeEscapedLatexArtifacts(applyOcrMathRepairs(stripInvalidControlChars(value))))
+              convertPlainAmpersandTables(normalizeEscapedLatexArtifactsSafe(applyOcrMathRepairs(stripInvalidControlChars(value))))
             )
+          )
           )
           )
           )
@@ -526,6 +724,9 @@ const normalizeLatexBody = (value: string) =>
         .replace(/√/g, '\\ensuremath{\\sqrt{}}')
         .trim()
         )
+        )
+        )
+        )
       )
     )
       )
@@ -533,7 +734,7 @@ const normalizeLatexBody = (value: string) =>
   ));
 
 const normalizePlainBody = (value: string) =>
-  normalizeEscapedLatexArtifacts(stripInvalidControlChars(value))
+  normalizeEscapedLatexArtifactsSafe(stripInvalidControlChars(value))
     .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n(${label}) `)
     .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/gi, '')
     .replace(/\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{[^}]+\}/gi, '')
@@ -712,6 +913,12 @@ const isInsideMathAt = (value: string, offset: number) => {
   let inDisplayDollar = false;
   let inParenMath = false;
   let inBracketMath = false;
+  const displayMathEnvs = new Set([
+    'align', 'align*', 'equation', 'equation*', 'gather', 'gather*',
+    'multline', 'multline*', 'flalign', 'flalign*', 'alignat', 'alignat*',
+    'split', 'aligned', 'gathered', 'alignedat', 'multlined'
+  ]);
+  let displayMathDepth = 0;
 
   for (let index = 0; index < offset; index += 1) {
     const current = value[index];
@@ -725,6 +932,24 @@ const isInsideMathAt = (value: string, offset: number) => {
         inBracketMath = true;
       } else if (next === ']') {
         inBracketMath = false;
+      } else if (next === 'b' && value.slice(index + 2, index + 8) === 'egin{') {
+        // Check for \begin{ environments
+        const endBrace = value.indexOf('}', index + 8);
+        if (endBrace > 0) {
+          const envName = value.slice(index + 8, endBrace).trim();
+          if (displayMathEnvs.has(envName)) {
+            displayMathDepth += 1;
+          }
+        }
+      } else if (next === 'e' && value.slice(index + 2, index + 6) === 'nd{') {
+        // Check for \end{ environments
+        const endBrace = value.indexOf('}', index + 6);
+        if (endBrace > 0) {
+          const envName = value.slice(index + 6, endBrace).trim();
+          if (displayMathEnvs.has(envName)) {
+            displayMathDepth = Math.max(0, displayMathDepth - 1);
+          }
+        }
       }
       continue;
     }
@@ -740,7 +965,7 @@ const isInsideMathAt = (value: string, offset: number) => {
     }
   }
 
-  return inInlineDollar || inDisplayDollar || inParenMath || inBracketMath;
+  return inInlineDollar || inDisplayDollar || inParenMath || inBracketMath || displayMathDepth > 0;
 };
 
 const applyCompileSafeLatexRepairs = (value: string) =>
@@ -915,14 +1140,22 @@ const balanceMathDelimiters = (value: string) => {
 const finalizeCompileSafeBody = (value: string) =>
   neutralizeUnknownLatexCommands(
     balanceMathDelimiters(
-      unwrapParenMathInsideInlineDollar(
-        unwrapInlineMathInsideDisplayMath(
-        normalizeInlineDollarMath(
-          balanceLatexBraces(
-            normalizeMalformedPiecewiseBlocks(
-              repairCasesRowSeparators(
-                repairTableRowSeparators(repairMatrixRowSeparators(normalizeEscapedLatexArtifacts(value)))
+      wrapBareCasesBlocksOutsideMath(
+        normalizeCasesTextLabels(
+          unwrapParenMathInsideInlineDollar(
+            unwrapDisplayMathAroundBlockLevelEnv(
+            unwrapInlineMathInsideDisplayMath(
+            normalizeInlineDollarMath(
+              balanceLatexBraces(
+                normalizeMalformedPiecewiseBlocks(
+                  repairCasesRowSeparators(
+                    repairAlignRowSeparators(
+                      repairTableRowSeparators(repairMatrixRowSeparators(normalizeEscapedLatexArtifactsSafe(value)))
+                    )
+                  )
+                )
               )
+            )
             )
           )
         )
@@ -971,6 +1204,23 @@ const extractTexLineNumber = (text: string) => {
   if (!line) return null;
   const parsed = Number(line);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const extractAllTexLineNumbers = (text: string) => {
+  const lines = new Set<number>();
+  const source = String(text || '');
+
+  for (const match of source.matchAll(/exam\.tex:(\d+):/gi)) {
+    const parsed = Number(match[1]);
+    if (Number.isFinite(parsed) && parsed > 0) lines.add(parsed);
+  }
+
+  for (const match of source.matchAll(/\bl\.(\d+)\b/gi)) {
+    const parsed = Number(match[1]);
+    if (Number.isFinite(parsed) && parsed > 0) lines.add(parsed);
+  }
+
+  return Array.from(lines).sort((a, b) => a - b);
 };
 
 const tailLines = (value: string, maxLines = 80) => {
@@ -1090,6 +1340,243 @@ const getRomanDisplayBase = (questionNumber: string | null | undefined) => {
   const withRoman = raw.match(/^(\d+)\s*\(?([a-z])\)?\s*\(?((?:ix|iv|v?i{0,3}|x))\)?/i);
   if (!withRoman) return null;
   return `${withRoman[1]}(${withRoman[2].toLowerCase()})`;
+};
+
+const toQuestionMarker = (question: ExportQuestion, index: number) => {
+  const questionNumber = String(question.question_number || index + 1)
+    .replace(/\s+/g, '')
+    .replace(/[^0-9A-Za-z()]/g, '');
+  return `% QIDX:${index + 1} QNUM:${questionNumber || index + 1}`;
+};
+
+type TexQuestionMarker = {
+  lineNumber: number;
+  questionIndex: number;
+  questionNumber: string;
+};
+
+const parseQuestionMarkersFromTex = (tex: string) => {
+  const markers: TexQuestionMarker[] = [];
+  const lines = String(tex || '').split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const match = line.match(/^%\s*QIDX:(\d+)\s+QNUM:([^\s]+)\s*$/);
+    if (!match) continue;
+
+    const parsedIndex = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(parsedIndex) || parsedIndex < 1) continue;
+
+    markers.push({
+      lineNumber: index + 1,
+      questionIndex: parsedIndex - 1,
+      questionNumber: String(match[2] || '').trim(),
+    });
+  }
+  return markers;
+};
+
+const findQuestionIndexForTexLine = (markers: TexQuestionMarker[], lineNumber: number) => {
+  let best: TexQuestionMarker | null = null;
+  for (const marker of markers) {
+    if (marker.lineNumber > lineNumber) break;
+    best = marker;
+  }
+  return best?.questionIndex ?? null;
+};
+
+const findCulpritQuestionIndexesFromFailures = ({
+  failures,
+  totalQuestions,
+}: {
+  failures: CompileFailureDetails[];
+  totalQuestions: number;
+}) => {
+  const culpritIndexes = new Set<number>();
+
+  for (const failure of failures) {
+    const markers = parseQuestionMarkersFromTex(failure.tex);
+    if (!markers.length) continue;
+
+    const candidateLines = new Set<number>();
+    if (failure.lineNumber) candidateLines.add(failure.lineNumber);
+
+    const evidenceBlob = [
+      failure.rawLog,
+      failure.rawStdout,
+      failure.rawStderr,
+      failure.diagnostic,
+      failure.texContext,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    for (const extractedLine of extractAllTexLineNumbers(evidenceBlob)) {
+      candidateLines.add(extractedLine);
+    }
+
+    for (const lineNumber of candidateLines) {
+      const questionIndex = findQuestionIndexForTexLine(markers, lineNumber);
+      if (questionIndex == null) continue;
+      if (questionIndex < 0 || questionIndex >= totalQuestions) continue;
+      culpritIndexes.add(questionIndex);
+    }
+  }
+
+  return Array.from(culpritIndexes).sort((a, b) => a - b);
+};
+
+const extractFirstJsonObject = (text: string) => {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end < 0 || end <= start) return null;
+  return text.slice(start, end + 1);
+};
+
+const parseJsonObjectOrNull = (text: string) => {
+  const extracted = extractFirstJsonObject(text);
+  if (!extracted) return null;
+  try {
+    const parsed = JSON.parse(extracted);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+};
+
+const getOpenAiText = (content: unknown) => {
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (part && typeof part === 'object' && 'text' in part) {
+        const text = (part as { text?: unknown }).text;
+        return typeof text === 'string' ? text : '';
+      }
+      return '';
+    })
+    .join('')
+    .trim();
+};
+
+const sanitizeRewriteField = (value: unknown) => {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  return finalizeCompileSafeBody(text);
+};
+
+const autoRewriteCulpritQuestions = async ({
+  questions,
+  culpritIndexes,
+  failures,
+}: {
+  questions: ExportQuestion[];
+  culpritIndexes: number[];
+  failures: CompileFailureDetails[];
+}) => {
+  if (!process.env.OPENAI_API_KEY) {
+    return {
+      rewrittenQuestions: questions,
+      rewrittenIndexes: [] as number[],
+      reason: 'OPENAI_API_KEY missing',
+    };
+  }
+
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const rewrittenQuestions = questions.map((question) => ({ ...question }));
+  const rewrittenIndexes: number[] = [];
+
+  const rewriteTargets = culpritIndexes.length
+    ? culpritIndexes.slice(0, MAX_AUTO_REWRITE_QUESTIONS)
+    : Array.from({ length: Math.min(questions.length, MAX_AUTO_REWRITE_QUESTIONS) }, (_item, index) => index);
+
+  const failureSummary = failures
+    .slice(-3)
+    .map((failure) => {
+      const line = failure.lineNumber ? `line ${failure.lineNumber}` : 'line unknown';
+      return `[${failure.attemptLabel}:${failure.compiler}] ${line}\n${truncateDiagnostic(failure.diagnostic || failure.message, 1400)}`;
+    })
+    .join('\n\n');
+
+  for (const index of rewriteTargets) {
+    const question = questions[index];
+    if (!question) continue;
+
+    const payload = {
+      question_number: question.question_number || null,
+      question_type: question.question_type || 'written',
+      question_text: question.question_text || '',
+      sample_answer: question.sample_answer || '',
+      marking_criteria: question.marking_criteria || '',
+      mcq_option_a: question.mcq_option_a || '',
+      mcq_option_b: question.mcq_option_b || '',
+      mcq_option_c: question.mcq_option_c || '',
+      mcq_option_d: question.mcq_option_d || '',
+      mcq_explanation: question.mcq_explanation || '',
+    };
+
+    try {
+      const completion = await openai.chat.completions.create({
+        model: EXPORT_PDF_REWRITE_MODEL,
+        reasoning_effort: 'high',
+        max_completion_tokens: 6000,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'You repair LaTeX fragments so they compile with pdflatex.',
+              'Preserve mathematical meaning and exam intent.',
+              'Return STRICT JSON only with keys:',
+              'question_text, sample_answer, marking_criteria, mcq_option_a, mcq_option_b, mcq_option_c, mcq_option_d, mcq_explanation.',
+              'Do not add markdown fences.',
+              'Avoid unsupported commands/packages/macros.',
+              'Keep outputs as LaTeX fragments (not full document).',
+            ].join(' '),
+          },
+          {
+            role: 'user',
+            content: [
+              `Compilation failed near question index ${index + 1}.`,
+              `Failure evidence:\n${failureSummary || 'No diagnostics provided.'}`,
+              'Rewrite this question payload to be compile-safe:',
+              JSON.stringify(payload),
+            ].join('\n\n'),
+          },
+        ],
+      });
+
+      const raw = getOpenAiText(completion.choices?.[0]?.message?.content);
+      const parsed = parseJsonObjectOrNull(raw);
+      if (!parsed) continue;
+
+      const rewritten: ExportQuestion = {
+        ...rewrittenQuestions[index],
+        question_text: sanitizeRewriteField(parsed.question_text) ?? rewrittenQuestions[index].question_text ?? null,
+        sample_answer: sanitizeRewriteField(parsed.sample_answer) ?? rewrittenQuestions[index].sample_answer ?? null,
+        marking_criteria: sanitizeRewriteField(parsed.marking_criteria) ?? rewrittenQuestions[index].marking_criteria ?? null,
+        mcq_option_a: sanitizeRewriteField(parsed.mcq_option_a) ?? rewrittenQuestions[index].mcq_option_a ?? null,
+        mcq_option_b: sanitizeRewriteField(parsed.mcq_option_b) ?? rewrittenQuestions[index].mcq_option_b ?? null,
+        mcq_option_c: sanitizeRewriteField(parsed.mcq_option_c) ?? rewrittenQuestions[index].mcq_option_c ?? null,
+        mcq_option_d: sanitizeRewriteField(parsed.mcq_option_d) ?? rewrittenQuestions[index].mcq_option_d ?? null,
+        mcq_explanation: sanitizeRewriteField(parsed.mcq_explanation) ?? rewrittenQuestions[index].mcq_explanation ?? null,
+      };
+
+      rewrittenQuestions[index] = rewritten;
+      rewrittenIndexes.push(index);
+    } catch (rewriteError) {
+      console.warn(
+        '[export-exam-pdf] auto rewrite failed for question',
+        index + 1,
+        rewriteError instanceof Error ? rewriteError.message : String(rewriteError)
+      );
+    }
+  }
+
+  return {
+    rewrittenQuestions,
+    rewrittenIndexes,
+    reason: '',
+  };
 };
 
 const writeQuestionImageAsset = async (tempDir: string, baseName: string, source: string) => {
@@ -1241,12 +1728,18 @@ const buildExamLatex = ({
       return escapeLatexText(normalized);
     }
     const displaySafeNormalized = unwrapParenMathInsideInlineDollar(
-      unwrapInlineMathInsideDisplayMath(normalized)
+      unwrapDisplayMathAroundBlockLevelEnv(
+        unwrapInlineMathInsideDisplayMath(normalized)
+      )
     );
     if (compileSafeMode) {
-      return finalizeCompileSafeBody(applyCompileSafeLatexRepairs(displaySafeNormalized));
+      return normalizeLatexForPdfEmission(
+        finalizeCasesSafety(finalizeCompileSafeBody(applyCompileSafeLatexRepairs(displaySafeNormalized)))
+      );
     }
-    return balanceMathDelimiters(displaySafeNormalized);
+    return normalizeLatexForPdfEmission(
+      finalizeCasesSafety(balanceMathDelimiters(displaySafeNormalized))
+    );
   };
 
   const renumberMap = new Map<string, number>();
@@ -1387,6 +1880,9 @@ const buildExamLatex = ({
         const subD = groupDetails[gi];
         const subMarks = Number(subQ.marks || 0);
         const subQuestionText = renderBody(String(subQ.question_text || '')) || 'No question text provided.';
+        const sourceQuestionIndex = groupStart + gi;
+
+        lines.push(toQuestionMarker(subQ, sourceQuestionIndex));
 
         lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.roman || '')})} ${subQuestionText}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
         lines.push('');
@@ -1424,6 +1920,9 @@ const buildExamLatex = ({
         const subD = groupDetails[gi];
         const subMarks = Number(subQ.marks || 0);
         const subQuestionText = renderBody(String(subQ.question_text || '')) || 'No question text provided.';
+        const sourceQuestionIndex = groupStart + gi;
+
+        lines.push(toQuestionMarker(subQ, sourceQuestionIndex));
 
         lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.subPart || '')})} ${subQuestionText}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
         lines.push('');
@@ -1439,6 +1938,7 @@ const buildExamLatex = ({
       // Standalone question (no roman sub-parts)
       const questionLabel = `Question ${details.mappedMain}${details.subPart ? ` (${details.subPart})` : ''}`;
       const lines: string[] = [];
+      lines.push(toQuestionMarker(question, cursor));
       lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
       lines.push(`\\textbf{${escapeLatexText(questionLabel)}}${marksLabel ? ` & \\textbf{${escapeLatexText(marksLabel)}}` : ' & '}\\\\[0.5em]`);
       lines.push('\\end{tabular*}');
@@ -1506,7 +2006,15 @@ ${body}
 \\end{document}`;
 };
 
-const compileTexToPdfLocal = async ({ tex, tempDir }: { tex: string; tempDir: string }) => {
+const compileTexToPdfLocal = async ({
+  tex,
+  tempDir,
+  attemptLabel,
+}: {
+  tex: string;
+  tempDir: string;
+  attemptLabel: string;
+}) => {
   const texPath = path.join(tempDir, LOCAL_TEX_FILENAME);
   const logPath = path.join(tempDir, 'exam.log');
   const pdfPath = path.join(tempDir, 'exam.pdf');
@@ -1551,7 +2059,19 @@ const compileTexToPdfLocal = async ({ tex, tempDir }: { tex: string; tempDir: st
       .filter(Boolean)
       .join('\n\n');
 
-    throw new Error(details || 'pdflatex failed');
+    const message = details || 'pdflatex failed';
+    throw new PdfCompileError({
+      attemptLabel,
+      compiler: 'local',
+      message,
+      tex,
+      lineNumber,
+      texContext,
+      diagnostic,
+      rawLog: logRaw,
+      rawStdout: String(execError.stdout || ''),
+      rawStderr: String(execError.stderr || ''),
+    });
   }
 
   const pdfBuffer = await readFile(pdfPath);
@@ -1566,10 +2086,12 @@ const compileTexToPdfRemote = async ({
   tex,
   tempDir,
   questions,
+  attemptLabel,
 }: {
   tex: string;
   tempDir: string;
   questions: ExportQuestion[];
+  attemptLabel: string;
 }) => {
   const referencedAssets = getReferencedAssetFilenames(questions);
   const resources: Array<Record<string, unknown>> = [
@@ -1625,14 +2147,27 @@ const compileTexToPdfRemote = async ({
   }
 
   const responseBodyText = outputBuffer.toString('utf8');
-  throw new Error(
-    [
-      `Remote compiler failed (${response.status} ${response.statusText}).`,
-      responseBodyText ? truncateDiagnostic(responseBodyText) : '',
-    ]
-      .filter(Boolean)
-      .join('\n\n')
-  );
+  const diagnostic = responseBodyText ? truncateDiagnostic(responseBodyText) : '';
+  const lineNumber = extractTexLineNumber(responseBodyText);
+  const message = [
+    `Remote compiler failed (${response.status} ${response.statusText}).`,
+    diagnostic,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  throw new PdfCompileError({
+    attemptLabel,
+    compiler: 'remote',
+    message,
+    tex,
+    lineNumber,
+    texContext: '',
+    diagnostic,
+    rawLog: responseBodyText,
+    rawStdout: '',
+    rawStderr: '',
+  });
 };
 
 const resolveCompileOrder = () => {
@@ -1660,6 +2195,7 @@ export async function POST(request: Request) {
     const downloadNameBase = String(body?.downloadName || 'custom-exam').trim() || 'custom-exam';
     const outputFormat = String(body?.format || 'pdf').trim().toLowerCase();
     const wantsTex = outputFormat === 'tex';
+    const autoFixExport = Boolean(body?.autoFixExport);
 
     if (!questions.length) {
       return Response.json({ error: 'At least one question is required to export TeX' }, { status: 400 });
@@ -1720,14 +2256,20 @@ export async function POST(request: Request) {
       }
 
       const compileErrors: string[] = [];
+      const compileFailures: CompileFailureDetails[] = [];
       const compileOrder = resolveCompileOrder();
 
       for (const attempt of attempts) {
         for (const compiler of compileOrder) {
           try {
             const pdfBuffer = compiler === 'remote'
-              ? await compileTexToPdfRemote({ tex: attempt.tex, tempDir, questions: enrichedQuestions })
-              : await compileTexToPdfLocal({ tex: attempt.tex, tempDir });
+              ? await compileTexToPdfRemote({
+                  tex: attempt.tex,
+                  tempDir,
+                  questions: enrichedQuestions,
+                  attemptLabel: attempt.label,
+                })
+              : await compileTexToPdfLocal({ tex: attempt.tex, tempDir, attemptLabel: attempt.label });
 
             const filename = `${baseFilename}.pdf`;
             return new Response(pdfBuffer, {
@@ -1740,8 +2282,107 @@ export async function POST(request: Request) {
             });
           } catch (attemptError) {
             const message = attemptError instanceof Error ? attemptError.message : String(attemptError);
+            if (attemptError instanceof PdfCompileError) {
+              compileFailures.push(attemptError.details);
+            }
             compileErrors.push(`[${attempt.label}:${compiler}] ${message}`);
           }
+        }
+      }
+
+      if (ENABLE_EXPORT_PDF_AUTO_REWRITE && autoFixExport) {
+        const culpritIndexes = findCulpritQuestionIndexesFromFailures({
+          failures: compileFailures,
+          totalQuestions: enrichedQuestions.length,
+        });
+
+        const rewriteResult = await autoRewriteCulpritQuestions({
+          questions: enrichedQuestions,
+          culpritIndexes,
+          failures: compileFailures,
+        });
+
+        const canRetryWithRewrites = rewriteResult.rewrittenIndexes.length > 0;
+        if (canRetryWithRewrites) {
+          const rewrittenQuestions = rewriteResult.rewrittenQuestions;
+          const rewrittenAttempts: Array<{ label: string; tex: string }> = [
+            {
+              label: 'rewritten-standard',
+              tex: buildExamLatex({
+                title,
+                subtitle,
+                includeSolutions,
+                questions: rewrittenQuestions,
+              }),
+            },
+            {
+              label: 'rewritten-compile-safe',
+              tex: buildExamLatex({
+                title,
+                subtitle,
+                includeSolutions,
+                questions: rewrittenQuestions,
+                compileSafeMode: true,
+              }),
+            },
+          ];
+
+          if (ENABLE_PLAIN_TEXT_PDF_FALLBACK) {
+            rewrittenAttempts.push({
+              label: 'rewritten-plain-text',
+              tex: buildExamLatex({
+                title,
+                subtitle,
+                includeSolutions,
+                questions: rewrittenQuestions,
+                compileSafeMode: true,
+                plainTextMode: true,
+              }),
+            });
+          }
+
+          const rewriteCompileErrors: string[] = [];
+
+          for (const attempt of rewrittenAttempts) {
+            for (const compiler of compileOrder) {
+              try {
+                const pdfBuffer = compiler === 'remote'
+                  ? await compileTexToPdfRemote({
+                      tex: attempt.tex,
+                      tempDir,
+                      questions: rewrittenQuestions,
+                      attemptLabel: attempt.label,
+                    })
+                  : await compileTexToPdfLocal({ tex: attempt.tex, tempDir, attemptLabel: attempt.label });
+
+                const filename = `${baseFilename}.pdf`;
+                return new Response(pdfBuffer, {
+                  status: 200,
+                  headers: {
+                    'Content-Type': 'application/pdf',
+                    'Content-Disposition': `attachment; filename="${filename}"`,
+                    'Cache-Control': 'no-store',
+                    'X-Pdf-Auto-Rewrite': 'applied',
+                  },
+                });
+              } catch (attemptError) {
+                const message = attemptError instanceof Error ? attemptError.message : String(attemptError);
+                rewriteCompileErrors.push(`[${attempt.label}:${compiler}] ${message}`);
+              }
+            }
+          }
+
+          compileErrors.push(
+            [
+              `Auto-rewrite attempted for question indexes: ${rewriteResult.rewrittenIndexes.map((index) => index + 1).join(', ')}`,
+              culpritIndexes.length
+                ? `Culprit indexes from logs: ${culpritIndexes.map((index) => index + 1).join(', ')}`
+                : 'Culprit indexes from logs: none (fallback rewrite scope applied)',
+              ...rewriteCompileErrors,
+            ].join('\n')
+          );
+        } else if (rewriteResult.reason) {
+          compileErrors.push(`Auto-rewrite skipped: ${rewriteResult.reason}`);
         }
       }
 

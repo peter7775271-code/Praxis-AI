@@ -45,8 +45,10 @@ export default function SettingsView({
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [unspecifiedTopicLimit, setUnspecifiedTopicLimit] = React.useState(10);
   const [selectedUnspecifiedTopicPapers, setSelectedUnspecifiedTopicPapers] = React.useState<string[]>([]);
+  const [unspecifiedExamSortBy, setUnspecifiedExamSortBy] = React.useState<'year' | 'grade' | 'subject'>('year');
+  const [unspecifiedExamSortDirection, setUnspecifiedExamSortDirection] = React.useState<'asc' | 'desc'>('desc');
+  const [unspecifiedExamSearch, setUnspecifiedExamSearch] = React.useState('');
   const [isClassifyingUnspecifiedTopics, setIsClassifyingUnspecifiedTopics] = React.useState(false);
   const [unspecifiedTopicStatus, setUnspecifiedTopicStatus] = React.useState<'idle' | 'success' | 'error'>('idle');
   const [unspecifiedTopicResult, setUnspecifiedTopicResult] = React.useState('');
@@ -71,6 +73,54 @@ export default function SettingsView({
   const checkoutStatus = searchParams.get('checkout');
   const checkoutType = searchParams.get('type');
   const checkoutSessionId = searchParams.get('session_id');
+
+  const unspecifiedTopicPapers = React.useMemo(
+    () => availablePapers.filter((paper: any) => Number(paper?.unspecifiedCount || 0) > 0),
+    [availablePapers]
+  );
+
+  const sortableUnspecifiedTopicPapers = React.useMemo(() => {
+    const query = unspecifiedExamSearch.trim().toLowerCase();
+    const filtered = query
+      ? unspecifiedTopicPapers.filter((paper: any) => {
+        const haystack = [paper.year, paper.grade, paper.subject, paper.school]
+          .map((value) => String(value || '').toLowerCase())
+          .join(' ');
+        return haystack.includes(query);
+      })
+      : [...unspecifiedTopicPapers];
+
+    filtered.sort((left: any, right: any) => {
+      const direction = unspecifiedExamSortDirection === 'asc' ? 1 : -1;
+      if (unspecifiedExamSortBy === 'year') {
+        const leftYear = Number(left.year);
+        const rightYear = Number(right.year);
+        if (leftYear !== rightYear) {
+          return (leftYear - rightYear) * direction;
+        }
+      } else if (unspecifiedExamSortBy === 'grade') {
+        const compare = String(left.grade || '').localeCompare(String(right.grade || ''));
+        if (compare !== 0) {
+          return compare * direction;
+        }
+      } else {
+        const compare = String(left.subject || '').localeCompare(String(right.subject || ''));
+        if (compare !== 0) {
+          return compare * direction;
+        }
+      }
+
+      const subjectCompare = String(left.subject || '').localeCompare(String(right.subject || ''));
+      if (subjectCompare !== 0) return subjectCompare;
+      const gradeCompare = String(left.grade || '').localeCompare(String(right.grade || ''));
+      if (gradeCompare !== 0) return gradeCompare;
+      const yearCompare = Number(right.year) - Number(left.year);
+      if (yearCompare !== 0) return yearCompare;
+      return String(left.school || '').localeCompare(String(right.school || ''));
+    });
+
+    return filtered;
+  }, [unspecifiedTopicPapers, unspecifiedExamSearch, unspecifiedExamSortBy, unspecifiedExamSortDirection]);
 
   React.useEffect(() => {
     if (checkoutStatus !== 'success' || checkoutType !== 'questions' || !checkoutSessionId || isConfirmingQuestionTokenCheckout) {
@@ -162,7 +212,7 @@ export default function SettingsView({
   }, []);
 
   React.useEffect(() => {
-    const validPaperKeys = new Set(availablePapers.map((paper: any) => getPaperKey(paper)));
+    const validPaperKeys = new Set(unspecifiedTopicPapers.map((paper: any) => getPaperKey(paper)));
     setSelectedUnspecifiedTopicPapers((prev) => {
       const filtered = prev.filter((key) => validPaperKeys.has(key));
       if (filtered.length > 0) return filtered;
@@ -171,7 +221,7 @@ export default function SettingsView({
       }
       return [];
     });
-  }, [availablePapers, selectedSyllabusMappingPaper]);
+  }, [unspecifiedTopicPapers, selectedSyllabusMappingPaper]);
 
   const runUnspecifiedTopicClassification = async () => {
     if (selectedUnspecifiedTopicPapers.length === 0) {
@@ -182,7 +232,7 @@ export default function SettingsView({
     }
 
     const selectedPapers = selectedUnspecifiedTopicPapers
-      .map((paperKey) => availablePapers.find((paper: any) => getPaperKey(paper) === paperKey))
+      .map((paperKey) => unspecifiedTopicPapers.find((paper: any) => getPaperKey(paper) === paperKey))
       .filter(Boolean);
 
     if (!selectedPapers.length) {
@@ -191,10 +241,6 @@ export default function SettingsView({
       setUnspecifiedTopicOutputs([]);
       return;
     }
-
-    const limit = Number.isFinite(unspecifiedTopicLimit)
-      ? Math.max(1, Math.min(200, Math.floor(unspecifiedTopicLimit)))
-      : 10;
 
     try {
       setIsClassifyingUnspecifiedTopics(true);
@@ -212,7 +258,6 @@ export default function SettingsView({
             subject: paper.subject,
             school: paper.school,
           })),
-          limit,
         }),
       });
 
@@ -1923,8 +1968,8 @@ await fetch('/api/dev/set-plan', {
                                 <div className="flex items-center gap-2">
                                   <button
                                     type="button"
-                                    onClick={() => setSelectedUnspecifiedTopicPapers(availablePapers.map((paper: any) => getPaperKey(paper)))}
-                                    disabled={isClassifyingUnspecifiedTopics || availablePapers.length === 0}
+                                    onClick={() => setSelectedUnspecifiedTopicPapers(unspecifiedTopicPapers.map((paper: any) => getPaperKey(paper)))}
+                                    disabled={isClassifyingUnspecifiedTopics || unspecifiedTopicPapers.length === 0}
                                     className="px-3 py-1 rounded-md text-xs font-medium cursor-pointer disabled:opacity-50"
                                     style={{ backgroundColor: 'var(--clr-surface-a20)', color: 'var(--clr-primary-a50)' }}
                                   >
@@ -1941,64 +1986,116 @@ await fetch('/api/dev/set-plan', {
                                   </button>
                                 </div>
                               </div>
-                              <select
-                                multiple
-                                value={selectedUnspecifiedTopicPapers}
-                                onChange={(e) => {
-                                  const values = Array.from(e.target.selectedOptions).map((option) => option.value);
-                                  setSelectedUnspecifiedTopicPapers(values);
-                                }}
-                                disabled={isClassifyingUnspecifiedTopics || availablePapers.length === 0}
-                                className="mt-2 w-full px-3 py-2 rounded-lg border text-sm"
+
+                              <div className="mt-2 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_180px_130px] gap-2">
+                                <input
+                                  type="text"
+                                  value={unspecifiedExamSearch}
+                                  onChange={(e) => setUnspecifiedExamSearch(e.target.value)}
+                                  placeholder="Search by year, grade, subject, school"
+                                  disabled={isClassifyingUnspecifiedTopics || unspecifiedTopicPapers.length === 0}
+                                  className="w-full px-3 py-2 rounded-lg border text-sm"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                />
+                                <select
+                                  value={unspecifiedExamSortBy}
+                                  onChange={(e) => setUnspecifiedExamSortBy(e.target.value as 'year' | 'grade' | 'subject')}
+                                  disabled={isClassifyingUnspecifiedTopics || unspecifiedTopicPapers.length === 0}
+                                  className="w-full px-3 py-2 rounded-lg border text-sm"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                >
+                                  <option value="year">Sort: Year</option>
+                                  <option value="grade">Sort: Grade</option>
+                                  <option value="subject">Sort: Subject</option>
+                                </select>
+                                <select
+                                  value={unspecifiedExamSortDirection}
+                                  onChange={(e) => setUnspecifiedExamSortDirection(e.target.value as 'asc' | 'desc')}
+                                  disabled={isClassifyingUnspecifiedTopics || unspecifiedTopicPapers.length === 0}
+                                  className="w-full px-3 py-2 rounded-lg border text-sm"
+                                  style={{
+                                    backgroundColor: 'var(--clr-surface-a0)',
+                                    borderColor: 'var(--clr-surface-tonal-a20)',
+                                    color: 'var(--clr-primary-a50)',
+                                  }}
+                                >
+                                  <option value="desc">Descending</option>
+                                  <option value="asc">Ascending</option>
+                                </select>
+                              </div>
+
+                              <div
+                                className="mt-2 w-full rounded-lg border p-2 overflow-y-auto"
                                 style={{
                                   backgroundColor: 'var(--clr-surface-a0)',
                                   borderColor: 'var(--clr-surface-tonal-a20)',
-                                  color: 'var(--clr-primary-a50)',
                                   minHeight: '132px',
+                                  maxHeight: '280px',
                                 }}
                               >
-                                {availablePapers.map((paper: any) => (
-                                  <option key={getPaperKey(paper)} value={getPaperKey(paper)}>
-                                    {paper.year} • {paper.grade} • {paper.subject} • {paper.school} ({paper.count} questions)
-                                  </option>
-                                ))}
-                              </select>
+                                {sortableUnspecifiedTopicPapers.length === 0 ? (
+                                  <p className="px-2 py-1 text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
+                                    {unspecifiedTopicPapers.length === 0
+                                      ? (loadingQuestions ? 'Loading exams…' : 'No exams currently have Unspecified topics.')
+                                      : 'No exams match your search.'}
+                                  </p>
+                                ) : (
+                                  <div className="space-y-1">
+                                    {sortableUnspecifiedTopicPapers.map((paper: any) => {
+                                      const paperKey = getPaperKey(paper);
+                                      const checked = selectedUnspecifiedTopicPapers.includes(paperKey);
+                                      return (
+                                        <label
+                                          key={paperKey}
+                                          className="flex items-start gap-2 px-2 py-1.5 rounded-md"
+                                          style={{
+                                            backgroundColor: checked ? 'var(--clr-surface-a10)' : 'transparent',
+                                            cursor: isClassifyingUnspecifiedTopics ? 'default' : 'pointer',
+                                          }}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={(e) => {
+                                              if (e.target.checked) {
+                                                setSelectedUnspecifiedTopicPapers((prev) => [...prev, paperKey]);
+                                              } else {
+                                                setSelectedUnspecifiedTopicPapers((prev) => prev.filter((key) => key !== paperKey));
+                                              }
+                                            }}
+                                            disabled={isClassifyingUnspecifiedTopics}
+                                            className="mt-0.5"
+                                          />
+                                          <span className="text-sm" style={{ color: 'var(--clr-primary-a50)' }}>
+                                            {paper.year} • {paper.grade} • {paper.subject} • {paper.school} ({paper.unspecifiedCount} unspecified / {paper.count} total)
+                                          </span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
                               <p className="mt-2 text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
-                                Hold Ctrl/Cmd to select multiple exams.
+                                Showing {sortableUnspecifiedTopicPapers.length} of {unspecifiedTopicPapers.length} exams with at least one Unspecified topic.
                               </p>
                             </div>
 
-                            <div>
-                              <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>
-                                Questions to process per exam
-                              </label>
-                              <input
-                                type="number"
-                                min={1}
-                                max={200}
-                                step={1}
-                                value={unspecifiedTopicLimit}
-                                onChange={(e) => {
-                                  const parsed = Number.parseInt(e.target.value, 10);
-                                  setUnspecifiedTopicLimit(Number.isFinite(parsed) ? parsed : 1);
-                                }}
-                                disabled={isClassifyingUnspecifiedTopics}
-                                className="mt-2 w-full px-4 py-2 rounded-lg border"
-                                style={{
-                                  backgroundColor: 'var(--clr-surface-a0)',
-                                  borderColor: 'var(--clr-surface-tonal-a20)',
-                                  color: 'var(--clr-primary-a50)',
-                                }}
-                              />
-                              <p className="mt-2 text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
-                                Year 11/12 papers automatically include both Year 11 and Year 12 taxonomy topics/subtopics.
-                              </p>
-                            </div>
+                            <p className="text-xs" style={{ color: 'var(--clr-surface-a40)' }}>
+                              Classification always processes every Unspecified-topic question in each selected exam. Year 11/12 papers automatically include both Year 11 and Year 12 taxonomy topics/subtopics.
+                            </p>
 
                             <div className="flex items-center gap-3">
                               <button
                                 onClick={runUnspecifiedTopicClassification}
-                                disabled={isClassifyingUnspecifiedTopics || availablePapers.length === 0 || selectedUnspecifiedTopicPapers.length === 0}
+                                disabled={isClassifyingUnspecifiedTopics || unspecifiedTopicPapers.length === 0 || selectedUnspecifiedTopicPapers.length === 0}
                                 className="px-4 py-2 rounded-lg font-medium cursor-pointer disabled:opacity-50"
                                 style={{
                                   backgroundColor: 'var(--clr-primary-a0)',
