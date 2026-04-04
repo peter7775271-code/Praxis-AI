@@ -54,6 +54,8 @@ class PdfCompileError extends Error {
 
 type ExportQuestion = {
   question_number?: string | null;
+  group_id?: string | null;
+  question_group_id?: string | null;
   question_text?: string | null;
   topic?: string | null;
   marks?: number | null;
@@ -1759,18 +1761,58 @@ const buildExamLatex = ({
     );
   };
 
-  const renumberMap = new Map<string, number>();
+  const explicitGroupIds = questions.map((question) => String(question.group_id || question.question_group_id || '').trim());
+  const explicitGroupCounts = new Map<string, number>();
+  for (const groupId of explicitGroupIds) {
+    if (!groupId) continue;
+    explicitGroupCounts.set(groupId, (explicitGroupCounts.get(groupId) || 0) + 1);
+  }
+
   let nextQuestionNumber = 1;
+  let lastRelatedKey: string | null = null;
+  let lastMappedMain: number | null = null;
   const parsedDetails = questions.map((question, index) => {
     const details = parseQuestionNumberForDisplay(question.question_number);
-    const baseKey = details.baseKey ?? `__row_${index}`;
-    if (!renumberMap.has(baseKey)) {
-      renumberMap.set(baseKey, nextQuestionNumber);
+    const explicitGroupId = explicitGroupIds[index];
+    const isRelatedGroup = Boolean(explicitGroupId) && (explicitGroupCounts.get(explicitGroupId) || 0) > 1;
+    const relatedKey = isRelatedGroup ? `gid:${explicitGroupId}` : null;
+
+    let mappedMain: number;
+    if (relatedKey) {
+      if (relatedKey === lastRelatedKey && lastMappedMain != null) {
+        mappedMain = lastMappedMain;
+      } else {
+        mappedMain = nextQuestionNumber;
+        nextQuestionNumber += 1;
+      }
+      lastRelatedKey = relatedKey;
+      lastMappedMain = mappedMain;
+    } else {
+      mappedMain = nextQuestionNumber;
       nextQuestionNumber += 1;
+      lastRelatedKey = null;
+      lastMappedMain = null;
     }
-    const mappedMain = renumberMap.get(baseKey) as number;
-    return { ...details, mappedMain };
+
+    return {
+      ...details,
+      mappedMain,
+      isRelatedGroup,
+      displaySubPart: isRelatedGroup ? details.subPart : null,
+      displayRoman: isRelatedGroup ? details.roman : null,
+    };
   });
+
+  const formatQuestionDisplayNumber = (details: { mappedMain: number; displaySubPart: string | null; displayRoman: string | null }) => {
+    const parts = [String(details.mappedMain)];
+    if (details.displaySubPart) {
+      parts.push(`(${details.displaySubPart})`);
+    }
+    if (details.displayRoman) {
+      parts.push(`(${details.displayRoman})`);
+    }
+    return parts.join(' ');
+  };
 
   const renderQuestionContent = (
     question: ExportQuestion,
@@ -1871,44 +1913,31 @@ const buildExamLatex = ({
     const marksLabel = marks > 0 ? `${marks} ${marks === 1 ? 'mark' : 'marks'}` : '';
 
     // Determine if this starts a roman-numeral group: same base + subPart, with roman
-    if (details.roman && details.subPart) {
-      const groupKey = `${details.mappedMain}_${details.subPart}`;
+    if (details.isRelatedGroup && details.displayRoman && details.displaySubPart) {
+      const groupKey = `${details.mappedMain}_${details.displaySubPart}`;
       // Collect consecutive questions with the same group
       const groupStart = cursor;
       while (cursor < questions.length) {
         const d = parsedDetails[cursor];
-        if (!d.roman || !d.subPart || `${d.mappedMain}_${d.subPart}` !== groupKey) break;
+        if (!d.isRelatedGroup || !d.displayRoman || !d.displaySubPart || `${d.mappedMain}_${d.displaySubPart}` !== groupKey) break;
         cursor += 1;
       }
       const groupQuestions = questions.slice(groupStart, cursor);
       const groupDetails = parsedDetails.slice(groupStart, cursor);
 
-      // Compute total marks for the group header
-      const totalMarks = groupQuestions.reduce((sum, q) => sum + Number(q.marks || 0), 0);
-      const totalMarksLabel = totalMarks > 0 ? `${totalMarks} ${totalMarks === 1 ? 'mark' : 'marks'}` : '';
-
       const lines: string[] = [];
-      // Group header: "Question N (a)"
-      const groupLabel = `Question ${details.mappedMain} (${details.subPart})`;
-      lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
-      lines.push(`\\textbf{${escapeLatexText(groupLabel)}}${totalMarksLabel ? ` & \\textbf{${escapeLatexText(totalMarksLabel)}}` : ' & '}\\\\[0.5em]`);
-      lines.push('\\end{tabular*}');
-
-      // Render each sub-item with roman label
       for (let gi = 0; gi < groupQuestions.length; gi += 1) {
         const subQ = groupQuestions[gi];
         const subD = groupDetails[gi];
         const subMarks = Number(subQ.marks || 0);
         const sourceQuestionIndex = groupStart + gi;
+        const displayLabel = `Question ${formatQuestionDisplayNumber(subD)}`;
 
         lines.push(toQuestionMarker(subQ, sourceQuestionIndex));
 
-        if (includeQuestionContent) {
-          const subQuestionText = renderBody(String(subQ.question_text || '')) || 'No question text provided.';
-          lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.roman || '')})} ${subQuestionText}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
-        } else {
-          lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.roman || '')})}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
-        }
+        lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
+        lines.push(`\\textbf{${escapeLatexText(displayLabel)}}${subMarks > 0 ? ` & \\textbf{${subMarks}}` : ' & '}\\\\[0.5em]`);
+        lines.push('\\end{tabular*}');
         lines.push('');
         renderQuestionContent(subQ, lines, '', !includeQuestionContent);
         if (gi < groupQuestions.length - 1) {
@@ -1918,41 +1947,31 @@ const buildExamLatex = ({
 
       lines.push('\\vspace{0.9em}');
       bodyParts.push(['\\filbreak', lines.join('\n')].join('\n'));
-    } else if (details.subPart && !details.roman) {
+    } else if (details.isRelatedGroup && details.displaySubPart && !details.displayRoman) {
       // Group lettered subparts (a), (b), (c) under a single Question N header.
       const groupMappedMain = details.mappedMain;
       const groupStart = cursor;
       while (cursor < questions.length) {
         const d = parsedDetails[cursor];
-        if (d.mappedMain !== groupMappedMain || !d.subPart || d.roman) break;
+        if (d.mappedMain !== groupMappedMain || !d.isRelatedGroup || !d.displaySubPart || d.displayRoman) break;
         cursor += 1;
       }
 
       const groupQuestions = questions.slice(groupStart, cursor);
       const groupDetails = parsedDetails.slice(groupStart, cursor);
-      const totalMarks = groupQuestions.reduce((sum, q) => sum + Number(q.marks || 0), 0);
-      const totalMarksLabel = totalMarks > 0 ? `${totalMarks} ${totalMarks === 1 ? 'mark' : 'marks'}` : '';
-
       const lines: string[] = [];
-      const groupLabel = `Question ${details.mappedMain}`;
-      lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
-      lines.push(`\\textbf{${escapeLatexText(groupLabel)}}${totalMarksLabel ? ` & \\textbf{${escapeLatexText(totalMarksLabel)}}` : ' & '}\\\\[0.5em]`);
-      lines.push('\\end{tabular*}');
-
       for (let gi = 0; gi < groupQuestions.length; gi += 1) {
         const subQ = groupQuestions[gi];
         const subD = groupDetails[gi];
         const subMarks = Number(subQ.marks || 0);
         const sourceQuestionIndex = groupStart + gi;
+        const displayLabel = `Question ${formatQuestionDisplayNumber(subD)}`;
 
         lines.push(toQuestionMarker(subQ, sourceQuestionIndex));
 
-        if (includeQuestionContent) {
-          const subQuestionText = renderBody(String(subQ.question_text || '')) || 'No question text provided.';
-          lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.subPart || '')})} ${subQuestionText}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
-        } else {
-          lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.subPart || '')})}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
-        }
+        lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
+        lines.push(`\\textbf{${escapeLatexText(displayLabel)}}${subMarks > 0 ? ` & \\textbf{${subMarks}}` : ' & '}\\\\[0.5em]`);
+        lines.push('\\end{tabular*}');
         lines.push('');
         renderQuestionContent(subQ, lines, '', !includeQuestionContent);
         if (gi < groupQuestions.length - 1) {
@@ -1964,7 +1983,7 @@ const buildExamLatex = ({
       bodyParts.push(['\\filbreak', lines.join('\n')].join('\n'));
     } else {
       // Standalone question (no roman sub-parts)
-      const questionLabel = `Question ${details.mappedMain}${details.subPart ? ` (${details.subPart})` : ''}`;
+      const questionLabel = `Question ${formatQuestionDisplayNumber(details)}`;
       const lines: string[] = [];
       lines.push(toQuestionMarker(question, cursor));
       lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');

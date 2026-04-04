@@ -30,6 +30,7 @@
     "express": "^5.2.1",
     "framer-motion": "^12.35.2",
     "jsonwebtoken": "^9.0.3",
+    "jszip": "^3.10.1",
     "lazy-brush": "^2.0.2",
     "lucide-react": "^0.563.0",
     "mafs": "^0.21.0",

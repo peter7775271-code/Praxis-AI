@@ -1,13 +1,79 @@
 'use client';
 
 import React from 'react';
-import { ArrowLeft, BookOpen, Download, Eye, EyeOff, Info } from 'lucide-react';
+import { ArrowLeft, BookOpen, Copy, Download, Eye, EyeOff, Image, Info } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { formatPartDividerPlaceholder, LatexText, QuestionTextWithDividers } from '../question-text-with-dividers';
 import { stripOuterBraces } from '../view-helpers';
 
 const DEFAULT_EXAM_SOURCE_LABEL = 'HSC';
 const RESPONSIVE_IMAGE_CLASS = 'mx-auto block h-auto max-h-[58vh] w-auto max-w-full object-contain';
+
+const copyTextToClipboard = async (value: string) => {
+  if (!value.trim()) return false;
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+
+  if (typeof document === 'undefined') return false;
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'absolute';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  return copied;
+};
+
+const normalizeImageUrl = (value: string | null | undefined) => {
+  const trimmed = String(value || '').trim();
+  return trimmed || null;
+};
+
+const collectQuestionImageCandidates = (question: CustomExamQuestion) => {
+  const candidates = [
+    normalizeImageUrl(question.graph_image_data),
+    normalizeImageUrl(question.sample_answer_image),
+    normalizeImageUrl(question.mcq_option_a_image),
+    normalizeImageUrl(question.mcq_option_b_image),
+    normalizeImageUrl(question.mcq_option_c_image),
+    normalizeImageUrl(question.mcq_option_d_image),
+  ].filter((value): value is string => Boolean(value));
+
+  return Array.from(new Set(candidates));
+};
+
+const getImageExtension = (imageUrl: string) => {
+  const lower = imageUrl.toLowerCase();
+  if (lower.startsWith('data:image/')) {
+    const typeMatch = lower.match(/^data:image\/([^;,]+)/);
+    const dataExt = typeMatch?.[1]?.trim();
+    if (dataExt === 'jpeg') return 'jpg';
+    return dataExt || 'png';
+  }
+
+  const pathMatch = imageUrl.match(/\.([a-z0-9]+)(?:\?|#|$)/i);
+  const ext = pathMatch?.[1]?.toLowerCase();
+  if (!ext) return 'png';
+  if (ext === 'jpeg') return 'jpg';
+  return ext;
+};
+
+const formatRawLatexForQuestion = (question: DisplayExamQuestion) => {
+  if (question.grouped_subparts.length > 0) {
+    return question.grouped_subparts
+      .map((subpart) => `${subpart.label}\n${subpart.question_text}`)
+      .join('\n\n');
+  }
+
+  return question.question_text;
+};
 
 const getMcqOptions = (question: CustomExamQuestion) => (
   [
@@ -50,6 +116,7 @@ type CustomExamQuestion = {
 type DisplayExamQuestion = CustomExamQuestion & {
   display_question_number: string;
   source_question_numbers: string[];
+  related_image_data: string[];
   grouped_subparts: Array<{
     id: string;
     label: string;
@@ -154,6 +221,7 @@ const buildGroupedQuestion = (group: CustomExamQuestion[]): DisplayExamQuestion 
       ...first,
       display_question_number: String(first.question_number || '').trim() || 'Question',
       source_question_numbers: originalNumber ? [originalNumber] : [],
+      related_image_data: collectQuestionImageCandidates(first),
       grouped_subparts: [],
     };
   }
@@ -215,6 +283,7 @@ const buildGroupedQuestion = (group: CustomExamQuestion[]): DisplayExamQuestion 
     sample_answer: sampleAnswer || first.sample_answer,
     graph_image_data: graphSource?.graph_image_data || first.graph_image_data,
     graph_image_size: graphSource?.graph_image_size || first.graph_image_size,
+    related_image_data: Array.from(new Set(sortedGroup.flatMap((question) => collectQuestionImageCandidates(question)))),
     grouped_subparts: parsedEntries.map(({ question, parsed }) => {
       const label = useRomanOnlyLabels && parsed.roman
         ? `(${parsed.roman})`
@@ -247,6 +316,64 @@ export default function CustomExamView({
   onBack: () => void;
 }) {
   const [showSolutions, setShowSolutions] = React.useState(false);
+  const [questionActionStatus, setQuestionActionStatus] = React.useState<Record<string, string>>({});
+
+  const setActionStatus = React.useCallback((questionId: string, message: string) => {
+    setQuestionActionStatus((prev) => ({ ...prev, [questionId]: message }));
+    window.setTimeout(() => {
+      setQuestionActionStatus((prev) => {
+        if (!prev[questionId]) return prev;
+        const next = { ...prev };
+        delete next[questionId];
+        return next;
+      });
+    }, 2200);
+  }, []);
+
+  const handleCopyRawLatex = React.useCallback(async (question: DisplayExamQuestion) => {
+    try {
+      const copied = await copyTextToClipboard(formatRawLatexForQuestion(question));
+      setActionStatus(question.id, copied ? 'Raw LaTeX copied.' : 'Unable to copy LaTeX.');
+    } catch {
+      setActionStatus(question.id, 'Unable to copy LaTeX.');
+    }
+  }, [setActionStatus]);
+
+  const handleCopyImageList = React.useCallback(async (question: DisplayExamQuestion) => {
+    const images = question.related_image_data;
+    if (!images.length) {
+      setActionStatus(question.id, 'No related images for this question.');
+      return;
+    }
+
+    try {
+      const copied = await copyTextToClipboard(images.join('\n'));
+      setActionStatus(question.id, copied ? `Copied ${images.length} image URL${images.length === 1 ? '' : 's'}.` : 'Unable to copy image URLs.');
+    } catch {
+      setActionStatus(question.id, 'Unable to copy image URLs.');
+    }
+  }, [setActionStatus]);
+
+  const handleDownloadImages = React.useCallback((question: DisplayExamQuestion, questionNumber: number) => {
+    const images = question.related_image_data;
+    if (!images.length) {
+      setActionStatus(question.id, 'No related images for this question.');
+      return;
+    }
+
+    images.forEach((imageUrl, index) => {
+      const link = document.createElement('a');
+      link.href = imageUrl;
+      link.download = `question-${questionNumber}-image-${index + 1}.${getImageExtension(imageUrl)}`;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+
+    setActionStatus(question.id, `Downloading ${images.length} image${images.length === 1 ? '' : 's'}...`);
+  }, [setActionStatus]);
+
   const displayQuestions = React.useMemo(() => {
     const grouped: DisplayExamQuestion[] = [];
 
@@ -415,9 +542,40 @@ export default function CustomExamView({
                       </PopoverContent>
                     </Popover>
                   </div>
-                  <p className="shrink-0 pt-0.5 text-right text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-400">
-                    {question.marks} mark{question.marks === 1 ? '' : 's'}
-                  </p>
+                  <div className="shrink-0 space-y-2">
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyRawLatex(question)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        Copy LaTeX
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyImageList(question)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
+                      >
+                        <Image className="h-3.5 w-3.5" />
+                        Copy image URLs
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadImages(question, displayNumber)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Download images
+                      </button>
+                    </div>
+                    <p className="text-right text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-400">
+                      {question.marks} mark{question.marks === 1 ? '' : 's'}
+                    </p>
+                    {questionActionStatus[question.id] ? (
+                      <p className="text-right text-xs font-medium text-neutral-500">{questionActionStatus[question.id]}</p>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="space-y-6 pt-6">
