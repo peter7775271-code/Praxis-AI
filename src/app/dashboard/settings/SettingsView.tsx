@@ -15,7 +15,7 @@ export default function SettingsView({
   question, error, examPdfFile, examImageFiles, pdfStatus, pdfMessage, pdfChatGptResponse,
   pdfRawInputs, pdfIngestV2File, pdfIngestV2Status, pdfIngestV2Message, pdfIngestV2Response,
   pdfOcrPreviewStatus, pdfOcrPreviewMessage, pdfOcrPreviewResponse,
-  pdfIngestV2GroupingMode, pdfIngestV2ClassifyAfterUpload, pdfIngestV2ReasoningEffort,
+  pdfIngestV2ClassifyAfterUpload, pdfIngestV2ReasoningEffort,
   pdfGrade, pdfYear, pdfSubject, pdfOverwrite, pdfGenerateCriteria,
   pdfAutoGroupSubparts, pdfSchoolName, pdfPaperNumber, selectedSyllabusMappingPaper,
   isMappingSyllabusDotPoints, syllabusMappingResult, syllabusMappingStatus,
@@ -33,7 +33,7 @@ export default function SettingsView({
   userStripeCancelAtPeriodEnd,
   onSaveDefaultPreset,
   setExamPdfFile, setCriteriaPdfFile, setExamImageFiles, setPdfIngestV2File,
-  setPdfIngestV2GroupingMode, setPdfIngestV2ClassifyAfterUpload, setPdfIngestV2ReasoningEffort,
+  setPdfIngestV2ClassifyAfterUpload, setPdfIngestV2ReasoningEffort,
   setPdfGrade, setPdfYear, setPdfSubject,
   setPdfOverwrite, setPdfGenerateCriteria, setPdfAutoGroupSubparts, setPdfSchoolName, setPdfPaperNumber,
   setSelectedSyllabusMappingPaper, setSyllabusWorkflowTestInput, setSyllabusImportText,
@@ -1477,23 +1477,6 @@ export default function SettingsView({
                               />
                               Overwrite existing rows for this grade/year/subject/school
                             </label>
-
-                            <div>
-                              <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>Question Grouping Mode</label>
-                              <select
-                                value={pdfIngestV2GroupingMode}
-                                onChange={(e) => setPdfIngestV2GroupingMode(e.target.value as 'main_question' | 'letter_subpart')}
-                                className="mt-2 w-full px-4 py-2 rounded-lg border"
-                                style={{
-                                  backgroundColor: 'var(--clr-surface-a0)',
-                                  borderColor: 'var(--clr-surface-tonal-a20)',
-                                  color: 'var(--clr-primary-a50)',
-                                }}
-                              >
-                                <option value="main_question">Send 11(a), 11(b), 11(c) together</option>
-                                <option value="letter_subpart">Send 11(a)(i), 11(a)(ii) together</option>
-                              </select>
-                            </div>
 
                             <div>
                               <label className="text-sm font-medium" style={{ color: 'var(--clr-surface-a50)' }}>GPT Reasoning Mode</label>

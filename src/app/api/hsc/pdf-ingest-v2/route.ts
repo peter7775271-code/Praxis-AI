@@ -114,7 +114,6 @@ type ParsedMcqOption = {
   imageRef: string | null;
 };
 
-type GroupingMode = 'main_question' | 'letter_subpart';
 type ReasoningEffort = 'medium' | 'high';
 
 type MathpixCredentials = {
@@ -161,6 +160,39 @@ type BatchPromptDebug = {
   }>;
 };
 
+type PersistDebugSnapshot = {
+  stage: string;
+  overwrite: boolean;
+  classifyAfterUpload: boolean;
+  reasoningEffort: ReasoningEffort;
+  maxQuestions: number;
+  solvedCount: number;
+  uploadableSolvedCount: number;
+  insertPayloadCount: number;
+  insertPayloadPreview: Array<{
+    questionNumber: string;
+    questionType: string;
+    marks: number;
+    graphImageCount: number;
+    questionTextPreview: string;
+    sampleAnswerPreview: string | null;
+    mcqCorrectAnswer: string | null;
+  }>;
+};
+
+type SerializableErrorDetails = {
+  name: string;
+  message: string;
+  stack?: string;
+  code?: string | number;
+  details?: string;
+  hint?: string;
+};
+
+type IngestErrorWithContext = Error & {
+  context?: Record<string, unknown>;
+};
+
 // Shared prompt fragments to reduce duplication
 const SHARED_STEM_RULE = 'Shared stem rule: For multi-part questions, include shared context only in the first subpart (e.g., 11 (a) or 11 (a)(i)). For later subparts (11 (b), 11 (c), 11 (a)(ii)), include only text specific to that subpart.';
 const NO_REPEAT_SUBPART_RULE = 'No repetition rule for subparts: never duplicate shared stem/context across sibling subparts. If part (a) contains a shared table/graph/diagram/data block or long setup text, keep it only in the first relevant subpart and do NOT copy it into (b), (c), or later roman subparts unless a tiny reference phrase is strictly needed for clarity.';
@@ -199,6 +231,14 @@ const LATEX_OUTPUT_RULES = [
 
 const classifyIngestError = (message: string) => {
   const normalized = String(message || '').toLowerCase();
+
+  if (normalized.includes('failed to persist questions') || normalized.includes('failed to overwrite existing questions')) {
+    return {
+      code: 'INGEST_PERSIST_FAILED',
+      hint: 'Inspect the debug.persist object in the response for the insert preview and any Supabase error fields (code, details, hint).',
+      status: 500,
+    };
+  }
 
   if (normalized.includes('mathpix request failed')) {
     return {
@@ -278,6 +318,63 @@ const classifyIngestError = (message: string) => {
     status: 500,
   };
 };
+
+const truncateDebugText = (value: unknown, maxLength = 180) => {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+};
+
+const serializeErrorDetails = (error: unknown): SerializableErrorDetails => {
+  if (error instanceof Error) {
+    const typedError = error as Error & {
+      code?: string | number;
+      details?: string;
+      hint?: string;
+    };
+
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      code: typedError.code,
+      details: typedError.details,
+      hint: typedError.hint,
+    };
+  }
+
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    return {
+      name: String(record.name || 'Error'),
+      message: String(record.message || JSON.stringify(record)),
+      stack: typeof record.stack === 'string' ? record.stack : undefined,
+      code: record.code as string | number | undefined,
+      details: typeof record.details === 'string' ? record.details : undefined,
+      hint: typeof record.hint === 'string' ? record.hint : undefined,
+    };
+  }
+
+  return {
+    name: 'Error',
+    message: String(error),
+  };
+};
+
+const buildInsertPayloadPreview = (insertPayload: Array<Record<string, unknown>>) =>
+  insertPayload.slice(0, 5).map((entry) => ({
+    questionNumber: String(entry.question_number ?? ''),
+    questionType: String(entry.question_type ?? ''),
+    marks: Number(entry.marks ?? 0),
+    graphImageCount: Array.isArray(entry.graph_image_data_list)
+      ? entry.graph_image_data_list.length
+      : entry.graph_image_data
+        ? 1
+        : 0,
+    questionTextPreview: truncateDebugText(entry.question_text),
+    sampleAnswerPreview: entry.sample_answer ? truncateDebugText(entry.sample_answer) : null,
+    mcqCorrectAnswer: entry.mcq_correct_answer ? String(entry.mcq_correct_answer) : null,
+  }));
 
 const parseBoolean = (value: FormDataEntryValue | null, fallback = false) => {
   if (value == null) return fallback;
@@ -936,33 +1033,18 @@ const parseQuestionNumberParts = (value: string | null | undefined) => {
   };
 };
 
-const groupParsedQuestions = (questions: ParsedQuestion[], mode: GroupingMode): ParsedQuestionBatch[] => {
+const normalizeQuestionKey = (value: string | null | undefined) => String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+
+const groupParsedQuestions = (questions: ParsedQuestion[]): ParsedQuestionBatch[] => {
   const grouped = new Map<string, ParsedQuestion[]>();
   const order: string[] = [];
 
-  const mainsWithLetterSubparts = new Set<string>();
   for (const question of questions) {
     const parts = parseQuestionNumberParts(question.questionNumber);
-    if (parts.main && parts.part) {
-      mainsWithLetterSubparts.add(parts.main);
-    }
-  }
-
-  for (const question of questions) {
-    const parts = parseQuestionNumberParts(question.questionNumber);
-
-    // In letter_subpart mode, if a main question has lettered children,
-    // do not send the whole parent chunk to OpenAI.
-    if (mode === 'letter_subpart' && parts.main && mainsWithLetterSubparts.has(parts.main) && !parts.part) {
-      continue;
-    }
-
     let key = `single:${question.index}`;
 
-    if (mode === 'main_question' && parts.main) {
-      key = `main:${parts.main}`;
-    } else if (mode === 'letter_subpart' && parts.main && parts.part) {
-      key = `letter:${parts.main}:${parts.part}`;
+    if (parts.main && parts.part && parts.roman) {
+      key = `roman:${parts.main}:${parts.part}`;
     }
 
     if (!grouped.has(key)) {
@@ -980,10 +1062,7 @@ const groupParsedQuestions = (questions: ParsedQuestion[], mode: GroupingMode): 
     let mergedLabel = first?.label || `Question ${groupIndex + 1}`;
     let mergedQuestionNumber = first?.questionNumber || null;
 
-    if (key.startsWith('main:') && firstParts.main) {
-      mergedLabel = `Question ${firstParts.main}`;
-      mergedQuestionNumber = firstParts.main;
-    } else if (key.startsWith('letter:') && firstParts.main && firstParts.part) {
+    if (key.startsWith('roman:') && firstParts.main && firstParts.part) {
       mergedLabel = `Question ${firstParts.main} (${firstParts.part})`;
       mergedQuestionNumber = `${firstParts.main} (${firstParts.part})`;
     }
@@ -1580,6 +1659,14 @@ const cleanQuestionBatchWithOpenAi = async (args: {
   reasoningEffort: ReasoningEffort;
 }) => {
   const { openai, batch, imageFiles, reasoningEffort } = args;
+  const sourceQuestionLookup = new Map<string, ParsedQuestion>();
+  const remainingSourceQuestions = [...batch.questions];
+  for (const question of batch.questions) {
+    const questionNumberKey = normalizeQuestionKey(question.questionNumber);
+    const labelKey = normalizeQuestionKey(question.label);
+    if (questionNumberKey) sourceQuestionLookup.set(questionNumberKey, question);
+    if (labelKey) sourceQuestionLookup.set(labelKey, question);
+  }
 
   const inputQuestions = batch.questions.map((question) => ({
     index: question.index,
@@ -1587,40 +1674,14 @@ const cleanQuestionBatchWithOpenAi = async (args: {
     questionNumber: question.questionNumber,
   }));
 
-  if (batch.questions.length === 1) {
-    const single = await cleanQuestionWithOpenAi({
-      openai,
-      question: batch.questions[0],
-      imageFiles,
-      reasoningEffort,
-    });
-
-    return {
-      solvedQuestions: [
-        {
-          sourceQuestion: batch.questions[0],
-          cleaned: single.cleaned,
-        },
-      ] satisfies BatchSolvedQuestion[],
-      debug: {
-        batchIndex: batch.index,
-        batchLabel: batch.label,
-        groupedCount: batch.questions.length,
-        usedGroupedPrompt: false,
-        systemPrompt: '',
-        userPrompt: '',
-        inputQuestions,
-      } satisfies BatchPromptDebug,
-    };
-  }
-
   const userContent: Array<{ type: 'text'; text: string }> = [
     {
       type: 'text',
       text: [
-        `Batch: ${batch.label} (${batch.questions.length} subparts)`,
+        `Batch: ${batch.label} (${batch.questions.length} related subparts)`,
         'Return {"solutions":[{questionNumber,label,questionText,sampleSolution,marks,questionType,mcqOptions,mcqCorrectAnswer,questionImageRefs,optionImageRefs}...]}',
-        `Exactly ${batch.questions.length} solutions in order, one per subpart. No merging.`,
+        'Return only the subparts that have enough context to solve confidently. If a question seems to not have enough context, ignore it completely and do not include it in the output.',
+        'The questions in this batch are related and should be solved together.',
         'Input subparts:',
         ...batch.questions.map((question, index) => [
           `--- ${index + 1}. ${question.label} ---`,
@@ -1630,7 +1691,7 @@ const cleanQuestionBatchWithOpenAi = async (args: {
     },
   ];
 
-  const systemPrompt = `Solve OCR-extracted exam questions. Output JSON only with key "solutions" containing array of {questionNumber, label, questionText, sampleSolution, marks, questionType, mcqOptions, mcqCorrectAnswer, questionImageRefs, optionImageRefs}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_OUTPUT_RULES} Step-by-step working with clear final answer. In sampleSolution, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability. Do not merge subparts.`;
+  const systemPrompt = `Solve OCR-extracted exam questions. Output JSON only with key "solutions" containing array of {questionNumber, label, questionText, sampleSolution, marks, questionType, mcqOptions, mcqCorrectAnswer, questionImageRefs, optionImageRefs}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_OUTPUT_RULES} Step-by-step working with clear final answer. In sampleSolution, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability. The questions in each batch are related, so use earlier subparts as context only when relevant. If a question lacks enough context, omit it completely instead of guessing. Do not merge unrelated questions.`;
 
   const userPrompt = userContent
     .map((item) => (item.type === 'text' ? item.text : ''))
@@ -1657,20 +1718,32 @@ const cleanQuestionBatchWithOpenAi = async (args: {
   const parsedJson = parseModelJsonObject(rawText, `grouped batch ${batch.label}`) as { solutions?: unknown[] };
   const solutions = Array.isArray(parsedJson?.solutions) ? parsedJson.solutions : [];
 
-  if (solutions.length !== batch.questions.length) {
-    throw new Error(
-      `Grouped solve returned ${solutions.length} solutions for ${batch.questions.length} inputs in ${batch.label}`
-    );
-  }
-
-  const solvedQuestions = solutions.map((entry, index) => {
+  const solvedQuestions: BatchSolvedQuestion[] = [];
+  for (const entry of solutions) {
     const record = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
     const cleaned = CleanedQuestionSchema.parse(record);
-    return {
-      sourceQuestion: batch.questions[index],
+    const questionNumberKey = normalizeQuestionKey(String(record.questionNumber || ''));
+    const labelKey = normalizeQuestionKey(String(record.label || ''));
+    const matchedQuestion = (questionNumberKey && sourceQuestionLookup.get(questionNumberKey)) || (labelKey && sourceQuestionLookup.get(labelKey)) || null;
+    const fallbackQuestion = remainingSourceQuestions.shift() || null;
+    const sourceQuestion = matchedQuestion || fallbackQuestion;
+
+    if (!sourceQuestion) {
+      continue;
+    }
+
+    if (matchedQuestion) {
+      const remainingIndex = remainingSourceQuestions.findIndex((question) => question === matchedQuestion);
+      if (remainingIndex >= 0) {
+        remainingSourceQuestions.splice(remainingIndex, 1);
+      }
+    }
+
+    solvedQuestions.push({
+      sourceQuestion,
       cleaned,
-    } satisfies BatchSolvedQuestion;
-  });
+    });
+  }
 
   return {
     solvedQuestions,
@@ -1784,6 +1857,7 @@ const isDevOnlyAllowed = () => {
 export async function POST(request: Request) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pdf-ingest-v2-'));
   let stage = 'init';
+  let persistDebugSnapshot: PersistDebugSnapshot | null = null;
 
   try {
     stage = 'dev-gate';
@@ -1825,8 +1899,6 @@ export async function POST(request: Request) {
 
     const maxQuestions = Math.max(1, Math.min(500, normalizePositiveInteger(formData.get('maxQuestions'), 200)));
     const overwrite = parseBoolean(formData.get('overwrite'), false);
-    const groupingModeRaw = String(formData.get('groupingMode') || 'letter_subpart').trim().toLowerCase();
-    const groupingMode: GroupingMode = groupingModeRaw === 'letter_subpart' ? 'letter_subpart' : 'main_question';
     const classifyAfterUpload = parseBoolean(formData.get('classifyAfterUpload'), true);
     const reasoningEffort = parseReasoningEffort(formData.get('reasoningEffort'), 'high');
     const pollIntervalMs = Math.max(1000, Math.min(60000, normalizePositiveInteger(formData.get('mathpixPollIntervalMs'), 3000)));
@@ -1876,10 +1948,15 @@ export async function POST(request: Request) {
           content: [
             'Split exam LaTeX into individual question blocks for downstream grouped solving.',
             CRITICAL_SPLITTING_RULE,
+            'Infer whether lettered parts are related from relevancy and wording, not just the raw labels.',
+            'Roman numeral subparts mean the questions are related.',
+            'Non roman-numeral subparts mean the questions are not related, for example 11 (a) and 11 (b).',
+            'If lettered parts are related, rename them so they fit the naming rule by nesting them under the same lettered stem with roman numerals, for example 11 (a) and 11 (b) become 11 (a)(i) and 11 (a)(ii).',
+            'Keep only the meaningful question blocks. If a fragment does not have enough context, omit it completely.',
             SHARED_STEM_RULE,
             NO_REPEAT_SUBPART_RULE,
             'Keep original order. Do not merge questions.',
-            'Always include subparts as separate entries when present.',
+            'When related lettered parts share a stem, output them as roman-numeral subparts under that stem instead of separate sibling lettered parts.',
             'Return STRICT JSON only: {"questions":[{"questionNumber":"2|11 (a)|11 (a)(i)","label":"Question 11 (a)(i)","latex":"raw latex block","imageRefs":["mathpix-image-ref"]}]}.',
             'The imageRefs field is required for each question entry and must contain image identifiers referenced by that specific question latex when available.',
             'If no image ref exists for a question, return imageRefs as an empty array [].',
@@ -1941,6 +2018,13 @@ export async function POST(request: Request) {
       );
     }
 
+    const groupedQuestionBatches = groupParsedQuestions(
+      questionBlocks.map((question) => ({
+        ...question,
+        isLikelyMcq: isLikelyMcqMainQuestion(question.questionNumber),
+      }))
+    );
+
     stage = 'solve-question-blocks-with-openai';
     const solvedBlocks: Array<{
       index: number;
@@ -1963,9 +2047,18 @@ export async function POST(request: Request) {
     }> = [];
     const splitSolveFailures: Array<Record<string, unknown>> = [];
 
-    for (const sourceQuestion of questionBlocks) {
+    for (const batch of groupedQuestionBatches) {
       try {
-        const referencedImagePaths = sourceQuestion.imageRefs
+        const sourceQuestionLookup = new Map<string, ParsedQuestion>();
+        const remainingSourceQuestions = [...batch.questions];
+        for (const question of batch.questions) {
+          const questionNumberKey = normalizeQuestionKey(question.questionNumber);
+          const labelKey = normalizeQuestionKey(question.label);
+          if (questionNumberKey) sourceQuestionLookup.set(questionNumberKey, question);
+          if (labelKey) sourceQuestionLookup.set(labelKey, question);
+        }
+
+        const referencedImagePaths = batch.imageRefs
           .map((ref) => resolveImageFromReference(ref, mathpix.imageFiles))
           .filter((value): value is string => Boolean(value));
 
@@ -1973,15 +2066,18 @@ export async function POST(request: Request) {
           {
             type: 'text',
             text: [
-              `Question label: ${sourceQuestion.label}`,
-              `Question number: ${sourceQuestion.questionNumber || sourceQuestion.label}`,
+              `Batch label: ${batch.label}`,
+              `Batch question number: ${batch.questionNumber || batch.label}`,
+              `Subparts in batch: ${batch.questions.length}`,
               `Attached image count: ${referencedImagePaths.length}`,
               'Return STRICT JSON only:',
-              '{"questionNumber":"2|11 (a)|11 (a)(i)","label":"Question 11 (a)(i)","questionType":"written|multiple_choice","formattedQuestionLatex":"...","mcqOptions":[{"label":"A","text":"...","imageRef":"mathpix-image-ref|null"},{"label":"B","text":"...","imageRef":"mathpix-image-ref|null"},{"label":"C","text":"...","imageRef":"mathpix-image-ref|null"},{"label":"D","text":"...","imageRef":"mathpix-image-ref|null"}],"optionImageRefs":{"A":"mathpix-image-ref|null","B":"mathpix-image-ref|null","C":"mathpix-image-ref|null","D":"mathpix-image-ref|null"},"mcqCorrectAnswer":"A|B|C|D|null","solutionLatex":"...","questionImageRefs":["mathpix-image-ref"]}',
+              '{"solutions":[{"questionNumber":"2|11 (a)|11 (a)(i)","label":"Question 11 (a)(i)","questionType":"written|multiple_choice","formattedQuestionLatex":"...","mcqOptions":[{"label":"A","text":"...","imageRef":"mathpix-image-ref|null"},{"label":"B","text":"...","imageRef":"mathpix-image-ref|null"},{"label":"C","text":"...","imageRef":"mathpix-image-ref|null"},{"label":"D","text":"...","imageRef":"mathpix-image-ref|null"}],"optionImageRefs":{"A":"mathpix-image-ref|null","B":"mathpix-image-ref|null","C":"mathpix-image-ref|null","D":"mathpix-image-ref|null"},"mcqCorrectAnswer":"A|B|C|D|null","solutionLatex":"...","questionImageRefs":["mathpix-image-ref"]}]}',
               '',
               CRITICAL_SPLITTING_RULE,
               'Rules:',
-              '- Return exactly one solved output for this input question block.',
+              '- Solve these related subparts together so shared context can be reused across the batch.',
+              '- Return only questions you can solve confidently. If a subpart does not have enough context, ignore it completely.',
+              '- Return one solution object per solved subpart in the solutions array.',
               '- Do not repeat shared context across sibling subparts. If a shared table/graph/setup appears in one subpart, avoid duplicating it in later subparts.',
               '- Identify whether the question is written or multiple-choice and return it as questionType.',
               '- If questionType is multiple_choice: return all options in mcqOptions and keep formattedQuestionLatex as the question stem only (no options).',
@@ -1996,8 +2092,11 @@ export async function POST(request: Request) {
               '- In align* blocks, use proper row breaks (\\\\) and do not include raw prose lines inside the environment.',
               `- ${LATEX_OUTPUT_RULES}`,
               '',
-              'Input question LaTeX:',
-              sourceQuestion.latex,
+              'Input subparts in this batch:',
+              ...batch.questions.map((question, index) => [
+                `--- ${index + 1}. ${question.label} (${question.questionNumber || 'unlabeled'}) ---`,
+                question.latex,
+              ].join('\n')),
             ].join('\n'),
           },
         ];
@@ -2009,12 +2108,6 @@ export async function POST(request: Request) {
           });
         }
 
-        const questionImageDataUrls = (
-          await Promise.all(referencedImagePaths.map((imagePath) => toDataUrl(imagePath)))
-        )
-          .map((value) => asImageDataUrlOrNull(value))
-          .filter((value): value is string => Boolean(value));
-
         const solveCompletion = await openai.chat.completions.create({
           model: MODEL_NAME,
           reasoning_effort: reasoningEffort,
@@ -2022,7 +2115,7 @@ export async function POST(request: Request) {
           messages: [
             {
               role: 'system',
-              content: `You are cleaning OCR LaTeX exam questions and producing solved outputs. Preserve math meaning. Return JSON only with questionNumber, questionType, formattedQuestionLatex, mcqOptions, optionImageRefs, questionImageRefs, mcqCorrectAnswer, solutionLatex. questionType must be exactly "written" or "multiple_choice". For multiple_choice, return all options in mcqOptions and keep formattedQuestionLatex as the stem only with no option lines. For written, return mcqOptions as [] and mcqCorrectAnswer as null. formattedQuestionLatex and solutionLatex must not contain escaped artifact tokens like literal \\n, \\r, \\t, \\\\n, or doubled command escapes. Emit clean LaTeX content as single-line field values (spaces only; no newline characters). In solutionLatex, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability. solutionLatex must be readable and compile-safe: valid delimiters, no repeated display-open delimiters, valid align* row breaks, and cases labels as \\text{...}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} If images are provided, do not describe image contents in output text. Use images only to solve. Do not include markdown code fences.`,
+              content: `You are cleaning OCR LaTeX exam questions and producing solved outputs. Preserve math meaning. Return JSON only with key "solutions" containing an array of objects with questionNumber, label, questionType, formattedQuestionLatex, mcqOptions, optionImageRefs, questionImageRefs, mcqCorrectAnswer, solutionLatex. questionType must be exactly "written" or "multiple_choice". For multiple_choice, return all options in mcqOptions and keep formattedQuestionLatex as the stem only with no option lines. For written, return mcqOptions as [] and mcqCorrectAnswer as null. formattedQuestionLatex and solutionLatex must not contain escaped artifact tokens like literal \\n, \\r, \\t, \\\\n, or doubled command escapes. Emit clean LaTeX content as single-line field values (spaces only; no newline characters). In solutionLatex, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability. solutionLatex must be readable and compile-safe: valid delimiters, no repeated display-open delimiters, valid align* row breaks, and cases labels as \\text{...}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} The questions in this batch are related and must be solved together. If a subpart lacks enough context, omit it completely. If images are provided, do not describe image contents in output text. Use images only to solve. Do not include markdown code fences.`,
             },
             {
               role: 'user',
@@ -2032,26 +2125,41 @@ export async function POST(request: Request) {
         });
 
         const rawSolveOutput = getCompletionText(solveCompletion.choices?.[0]?.message?.content);
-        const solveParsedRoot = parseModelJsonObject(rawSolveOutput, `solve-question-${sourceQuestion.index}`) as Record<string, unknown>;
-        const solveParsed = solveParsedRoot && typeof solveParsedRoot === 'object'
-          ? (Array.isArray(solveParsedRoot.solutions)
-              ? (solveParsedRoot.solutions[0] as Record<string, unknown> | undefined) || {}
-              : (solveParsedRoot.solution && typeof solveParsedRoot.solution === 'object'
-                  ? (solveParsedRoot.solution as Record<string, unknown>)
-                  : solveParsedRoot))
-          : {};
+        const solveParsedRoot = parseModelJsonObject(rawSolveOutput, `solve-batch-${batch.index}`) as Record<string, unknown>;
+        const solveEntries = Array.isArray(solveParsedRoot?.solutions)
+          ? solveParsedRoot.solutions
+          : [solveParsedRoot];
 
-        const solvedQuestionNumberRaw = String(solveParsed.questionNumber || '').trim();
-        const solvedQuestionNumber = solvedQuestionNumberRaw || sourceQuestion.questionNumber || sourceQuestion.label;
+        for (const solveEntry of solveEntries) {
+          const solveParsed = (solveEntry && typeof solveEntry === 'object' ? solveEntry : {}) as Record<string, unknown>;
+          const questionNumberKey = normalizeQuestionKey(String(solveParsed.questionNumber || ''));
+          const labelKey = normalizeQuestionKey(String(solveParsed.label || ''));
+          const matchedSource = (questionNumberKey && sourceQuestionLookup.get(questionNumberKey)) || (labelKey && sourceQuestionLookup.get(labelKey)) || null;
+          const fallbackSource = remainingSourceQuestions.shift() || null;
+          const sourceQuestion = matchedSource || fallbackSource;
 
-        const normalizedQuestionType = String(solveParsed.questionType || '').trim().toLowerCase();
-        const questionType: 'written' | 'multiple_choice' = normalizedQuestionType === 'multiple_choice'
-          ? 'multiple_choice'
-          : 'written';
+          if (!sourceQuestion) {
+            continue;
+          }
 
-        const modelOptionImageRefs = normalizeOptionImageRefs(solveParsed.optionImageRefs);
-        const parsedModelMcqOptions: ParsedMcqOption[] = Array.isArray(solveParsed.mcqOptions)
-          ? solveParsed.mcqOptions
+          if (matchedSource) {
+            const remainingIndex = remainingSourceQuestions.findIndex((question) => question === matchedSource);
+            if (remainingIndex >= 0) {
+              remainingSourceQuestions.splice(remainingIndex, 1);
+            }
+          }
+
+          const solvedQuestionNumberRaw = String(solveParsed.questionNumber || '').trim();
+          const solvedQuestionNumber = solvedQuestionNumberRaw || sourceQuestion.questionNumber || sourceQuestion.label;
+
+          const normalizedQuestionType = String(solveParsed.questionType || '').trim().toLowerCase();
+          const questionType: 'written' | 'multiple_choice' = normalizedQuestionType === 'multiple_choice'
+            ? 'multiple_choice'
+            : 'written';
+
+          const modelOptionImageRefs = normalizeOptionImageRefs(solveParsed.optionImageRefs);
+          const parsedModelMcqOptions: ParsedMcqOption[] = Array.isArray(solveParsed.mcqOptions)
+            ? solveParsed.mcqOptions
               .map((entry): ParsedMcqOption | null => {
                 const record = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : null;
                 if (!record) return null;
@@ -2076,102 +2184,103 @@ export async function POST(request: Request) {
                 };
               })
               .filter((entry): entry is ParsedMcqOption => entry !== null)
-          : [];
+            : [];
 
-        const formattedQuestionStem = sanitizeLatexForStorage(String(solveParsed.formattedQuestionLatex || '').trim());
-        const fallbackParsedOptions = parseMcqOptionsFromLatex(formattedQuestionStem);
-        const mcqOptions = questionType === 'multiple_choice'
-          ? (parsedModelMcqOptions.length ? parsedModelMcqOptions : fallbackParsedOptions)
-          : [];
+          const formattedQuestionStem = sanitizeLatexForStorage(String(solveParsed.formattedQuestionLatex || '').trim());
+          const fallbackParsedOptions = parseMcqOptionsFromLatex(formattedQuestionStem);
+          const mcqOptions = questionType === 'multiple_choice'
+            ? (parsedModelMcqOptions.length ? parsedModelMcqOptions : fallbackParsedOptions)
+            : [];
 
-        const optionRefByLabel = new Map<McqOptionLabel, string | null>();
-        for (const label of ['A', 'B', 'C', 'D'] as const) {
-          const fromModelOption = parsedModelMcqOptions.find((option) => option.label === label)?.imageRef || null;
-          const fromFallbackOption = fallbackParsedOptions.find((option) => option.label === label)?.imageRef || null;
-          optionRefByLabel.set(label, mergeOptionImageRef({
-            label,
-            entryLevelRef: fromModelOption,
-            optionImageRefs: modelOptionImageRefs,
-            fallbackRef: fromFallbackOption,
-          }));
+          const optionRefByLabel = new Map<McqOptionLabel, string | null>();
+          for (const label of ['A', 'B', 'C', 'D'] as const) {
+            const fromModelOption = parsedModelMcqOptions.find((option) => option.label === label)?.imageRef || null;
+            const fromFallbackOption = fallbackParsedOptions.find((option) => option.label === label)?.imageRef || null;
+            optionRefByLabel.set(label, mergeOptionImageRef({
+              label,
+              entryLevelRef: fromModelOption,
+              optionImageRefs: modelOptionImageRefs,
+              fallbackRef: fromFallbackOption,
+            }));
+          }
+
+          const formattedQuestionLatex = questionType === 'multiple_choice'
+            ? stripMcqOptionLines(formattedQuestionStem)
+            : formattedQuestionStem;
+
+          const mcqCorrectAnswerRaw = String(solveParsed.mcqCorrectAnswer || '').trim().toUpperCase();
+          const mcqCorrectAnswer = questionType === 'multiple_choice' && ['A', 'B', 'C', 'D'].includes(mcqCorrectAnswerRaw)
+            ? (mcqCorrectAnswerRaw as 'A' | 'B' | 'C' | 'D')
+            : null;
+          const solutionLatex = sanitizeLatexForStorage(String(solveParsed.solutionLatex || '').trim());
+
+          if (!formattedQuestionLatex || !solutionLatex) {
+            continue;
+          }
+
+          const modelImageRefs = Array.isArray(solveParsed.questionImageRefs)
+            ? solveParsed.questionImageRefs.map((value) => String(value || '').trim()).filter(Boolean)
+            : [];
+          const mergedImageRefs = Array.from(new Set([...modelImageRefs, ...sourceQuestion.imageRefs]));
+
+          const optionImageRefsInUse = new Set(
+            (['A', 'B', 'C', 'D'] as const)
+              .map((label) => optionRefByLabel.get(label))
+              .filter((value): value is string => Boolean(value))
+          );
+
+          const questionImagePaths = mergedImageRefs
+            .filter((ref) => !optionImageRefsInUse.has(ref))
+            .map((ref) => resolveImageFromReference(ref, mathpix.imageFiles))
+            .filter((value): value is string => Boolean(value));
+          const perQuestionImageDataUrls = (
+            await Promise.all(questionImagePaths.map((imagePath) => toDataUrl(imagePath)))
+          )
+            .map((value) => asImageDataUrlOrNull(value))
+            .filter((value): value is string => Boolean(value));
+
+          const resolveOptionImageData = async (label: McqOptionLabel) => {
+            const optionRef = optionRefByLabel.get(label);
+            if (!optionRef) return null;
+            const resolved = resolveImageFromReference(optionRef, mathpix.imageFiles);
+            if (!resolved) return null;
+            return asImageDataUrlOrNull(await toDataUrl(resolved));
+          };
+
+          const [mcqOptionAImage, mcqOptionBImage, mcqOptionCImage, mcqOptionDImage] = questionType === 'multiple_choice'
+            ? await Promise.all([
+                resolveOptionImageData('A'),
+                resolveOptionImageData('B'),
+                resolveOptionImageData('C'),
+                resolveOptionImageData('D'),
+              ])
+            : [null, null, null, null];
+
+          solvedBlocks.push({
+            index: sourceQuestion.index,
+            label: sourceQuestion.label,
+            questionNumber: solvedQuestionNumber,
+            inputLatex: sourceQuestion.latex,
+            imageRefs: mergedImageRefs,
+            imageCount: questionImagePaths.length,
+            questionImageDataUrls: perQuestionImageDataUrls,
+            questionType,
+            mcqOptions,
+            mcqOptionAImage,
+            mcqOptionBImage,
+            mcqOptionCImage,
+            mcqOptionDImage,
+            mcqCorrectAnswer,
+            formattedQuestionLatex,
+            solutionLatex,
+            rawChatGptOutput: solveParsed,
+          });
         }
-
-        const formattedQuestionLatex = questionType === 'multiple_choice'
-          ? stripMcqOptionLines(formattedQuestionStem)
-          : formattedQuestionStem;
-
-        const mcqCorrectAnswerRaw = String(solveParsed.mcqCorrectAnswer || '').trim().toUpperCase();
-        const mcqCorrectAnswer = questionType === 'multiple_choice' && ['A', 'B', 'C', 'D'].includes(mcqCorrectAnswerRaw)
-          ? (mcqCorrectAnswerRaw as 'A' | 'B' | 'C' | 'D')
-          : null;
-        const solutionLatex = sanitizeLatexForStorage(String(solveParsed.solutionLatex || '').trim());
-
-        if (!formattedQuestionLatex || !solutionLatex) {
-          throw new Error('Solve output missing formattedQuestionLatex or solutionLatex');
-        }
-
-        const modelImageRefs = Array.isArray(solveParsed.questionImageRefs)
-          ? solveParsed.questionImageRefs.map((value) => String(value || '').trim()).filter(Boolean)
-          : [];
-        const mergedImageRefs = Array.from(new Set([...modelImageRefs, ...sourceQuestion.imageRefs]));
-
-        const optionImageRefsInUse = new Set(
-          (['A', 'B', 'C', 'D'] as const)
-            .map((label) => optionRefByLabel.get(label))
-            .filter((value): value is string => Boolean(value))
-        );
-
-        const questionImagePaths = mergedImageRefs
-          .filter((ref) => !optionImageRefsInUse.has(ref))
-          .map((ref) => resolveImageFromReference(ref, mathpix.imageFiles))
-          .filter((value): value is string => Boolean(value));
-        const perQuestionImageDataUrls = (
-          await Promise.all(questionImagePaths.map((imagePath) => toDataUrl(imagePath)))
-        )
-          .map((value) => asImageDataUrlOrNull(value))
-          .filter((value): value is string => Boolean(value));
-
-        const resolveOptionImageData = async (label: McqOptionLabel) => {
-          const optionRef = optionRefByLabel.get(label);
-          if (!optionRef) return null;
-          const resolved = resolveImageFromReference(optionRef, mathpix.imageFiles);
-          if (!resolved) return null;
-          return asImageDataUrlOrNull(await toDataUrl(resolved));
-        };
-
-        const [mcqOptionAImage, mcqOptionBImage, mcqOptionCImage, mcqOptionDImage] = questionType === 'multiple_choice'
-          ? await Promise.all([
-              resolveOptionImageData('A'),
-              resolveOptionImageData('B'),
-              resolveOptionImageData('C'),
-              resolveOptionImageData('D'),
-            ])
-          : [null, null, null, null];
-
-        solvedBlocks.push({
-          index: sourceQuestion.index,
-          label: sourceQuestion.label,
-          questionNumber: solvedQuestionNumber,
-          inputLatex: sourceQuestion.latex,
-          imageRefs: mergedImageRefs,
-          imageCount: questionImagePaths.length,
-          questionImageDataUrls: perQuestionImageDataUrls,
-          questionType,
-          mcqOptions,
-          mcqOptionAImage,
-          mcqOptionBImage,
-          mcqOptionCImage,
-          mcqOptionDImage,
-          mcqCorrectAnswer,
-          formattedQuestionLatex,
-          solutionLatex,
-          rawChatGptOutput: solveParsed,
-        });
       } catch (error) {
         splitSolveFailures.push({
-          index: sourceQuestion.index,
-          label: sourceQuestion.label,
-          questionNumber: sourceQuestion.questionNumber,
+          index: batch.index,
+          label: batch.label,
+          questionNumber: batch.questionNumber,
           reason: error instanceof Error ? error.message : String(error),
         });
       }
@@ -2195,6 +2304,18 @@ export async function POST(request: Request) {
         splitQuestionsJson: {
           total: splitBlocks.length,
           processed: questionBlocks.length,
+          groupedBatches: groupedQuestionBatches.length,
+          groupedQuestions: groupedQuestionBatches.map((batch) => ({
+            index: batch.index,
+            label: batch.label,
+            questionNumber: batch.questionNumber,
+            groupedCount: batch.questions.length,
+            groupedSubparts: batch.questions.map((question) => ({
+              index: question.index,
+              label: question.label,
+              questionNumber: question.questionNumber,
+            })),
+          })),
           questions: questionBlocks,
           rawChatGptOutput: splitParsed,
         },
@@ -2297,6 +2418,18 @@ export async function POST(request: Request) {
       };
     });
 
+    persistDebugSnapshot = {
+      stage,
+      overwrite,
+      classifyAfterUpload,
+      reasoningEffort,
+      maxQuestions,
+      solvedCount: solvedBlocks.length,
+      uploadableSolvedCount: uploadableSolvedBlocks.length,
+      insertPayloadCount: insertPayload.length,
+      insertPayloadPreview: buildInsertPayloadPreview(insertPayload),
+    };
+
     if (!insertPayload.length) {
       return NextResponse.json(
         {
@@ -2315,7 +2448,13 @@ export async function POST(request: Request) {
       .select('id, question_number, question_type, graph_image_data, graph_image_data_list');
 
     if (insertError) {
-      throw new Error(`Failed to persist questions: ${insertError.message}`);
+      const persistError = new Error(`Failed to persist questions: ${insertError.message}`) as IngestErrorWithContext;
+      persistError.context = {
+        stage: 'persist-solved-questions',
+        insertError: serializeErrorDetails(insertError),
+        persist: persistDebugSnapshot,
+      };
+      throw persistError;
     }
 
     let classificationResult: Record<string, unknown> | null = null;
@@ -2364,7 +2503,6 @@ export async function POST(request: Request) {
         total: splitBlocks.length,
         processed: questionBlocks.length,
         groupedBatches: questionBlocks.length,
-        groupingMode,
         reasoningEffort,
         questions: questionBlocks,
         rawChatGptOutput: splitParsed,
@@ -2395,7 +2533,7 @@ export async function POST(request: Request) {
     }
 
     split = filterNonEmptyQuestions(split);
-    const groupedQuestions = groupParsedQuestions(split, groupingMode);
+    const groupedQuestions = groupParsedQuestions(split);
     const parsedBatches = groupedQuestions.slice(0, maxQuestions);
     if (!parsedBatches.length) {
       return NextResponse.json(
@@ -2426,7 +2564,6 @@ export async function POST(request: Request) {
         success: true,
         dryRun: true,
         model: MODEL_NAME,
-        groupingMode,
         source: {
           type: 'mathpix',
           pdfId: mathpix.pdfId,
@@ -2615,7 +2752,6 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       model: MODEL_NAME,
-      groupingMode,
       debugOnly: true,
       persistence: 'disabled',
       source: {
@@ -2656,6 +2792,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     const classified = classifyIngestError(details);
+    const errorContext = error instanceof Error ? (error as IngestErrorWithContext).context : undefined;
 
     return NextResponse.json(
       {
@@ -2664,6 +2801,11 @@ export async function POST(request: Request) {
         code: classified.code,
         hint: classified.hint,
         stage,
+        debug: {
+          error: serializeErrorDetails(error),
+          context: errorContext,
+          persist: persistDebugSnapshot,
+        },
       },
       { status: classified.status }
     );

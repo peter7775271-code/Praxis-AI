@@ -318,7 +318,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [pdfOcrPreviewStatus, setPdfOcrPreviewStatus] = useState<'idle' | 'uploading' | 'ready' | 'error'>('idle');
   const [pdfOcrPreviewMessage, setPdfOcrPreviewMessage] = useState<string>('');
   const [pdfOcrPreviewResponse, setPdfOcrPreviewResponse] = useState<string>('');
-  const [pdfIngestV2GroupingMode, setPdfIngestV2GroupingMode] = useState<'main_question' | 'letter_subpart'>('main_question');
   const [pdfIngestV2ClassifyAfterUpload, setPdfIngestV2ClassifyAfterUpload] = useState(true);
   const [pdfIngestV2ReasoningEffort, setPdfIngestV2ReasoningEffort] = useState<'medium' | 'high'>('high');
   const [pdfGrade, setPdfGrade] = useState<'Year 7' | 'Year 8' | 'Year 9' | 'Year 10' | 'Year 11' | 'Year 12'>('Year 12');
@@ -3006,7 +3005,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     payload.append('subject', pdfSubject);
     payload.append('school', pdfSchoolName.trim());
     payload.append('overwrite', pdfOverwrite ? 'true' : 'false');
-    payload.append('groupingMode', pdfIngestV2GroupingMode);
     payload.append('classifyAfterUpload', pdfIngestV2ClassifyAfterUpload ? 'true' : 'false');
     payload.append('reasoningEffort', pdfIngestV2ReasoningEffort);
 
@@ -3066,7 +3064,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     payload.append('year', (pdfYearRef.current ?? pdfYear) || '');
     payload.append('subject', pdfSubject);
     payload.append('school', pdfSchoolName.trim() || 'OCR Preview');
-    payload.append('groupingMode', pdfIngestV2GroupingMode);
     payload.append('reasoningEffort', pdfIngestV2ReasoningEffort);
     payload.append('maxQuestions', '200');
     payload.append('dryRun', 'true');
@@ -5393,7 +5390,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                   pdfOcrPreviewStatus={pdfOcrPreviewStatus}
                   pdfOcrPreviewMessage={pdfOcrPreviewMessage}
                   pdfOcrPreviewResponse={pdfOcrPreviewResponse}
-                  pdfIngestV2GroupingMode={pdfIngestV2GroupingMode}
                   pdfIngestV2ClassifyAfterUpload={pdfIngestV2ClassifyAfterUpload}
                   pdfIngestV2ReasoningEffort={pdfIngestV2ReasoningEffort}
                   pdfGrade={pdfGrade}
@@ -5445,7 +5441,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
                   setCriteriaPdfFile={setCriteriaPdfFile}
                   setExamImageFiles={setExamImageFiles}
                   setPdfIngestV2File={setPdfIngestV2File}
-                  setPdfIngestV2GroupingMode={setPdfIngestV2GroupingMode}
                   setPdfIngestV2ClassifyAfterUpload={setPdfIngestV2ClassifyAfterUpload}
                   setPdfIngestV2ReasoningEffort={setPdfIngestV2ReasoningEffort}
                   setPdfGrade={setPdfGrade}

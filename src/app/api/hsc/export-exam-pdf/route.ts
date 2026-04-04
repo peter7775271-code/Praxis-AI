@@ -302,6 +302,19 @@ const collapseNestedDisplayOpenersBeforeCases = (value: string) =>
     // Fallback: collapse direct nested openers right before a cases block.
     .replace(/\\\[\s*\\\[\s*(?=\\begin\{(?:cases|dcases|rcases|drcases)\})/g, '\\[');
 
+const unwrapDisplayMathInsideInlineMathForCases = (value: string) =>
+  String(value || '')
+    // Repair mixed delimiters like "\\( f(x)=\\[\\begin{cases}...\\end{cases}\\] \\)".
+    .replace(
+      /\\\(\s*([^\\\n][^\n]{0,200}?)\s*=\s*\\\[\s*(\\begin\{(cases|dcases|rcases|drcases)\}[\s\S]*?\\end\{\3\})\s*\\\]\s*\\\)/g,
+      (_match, lhs, casesBlock) => `\\[ ${String(lhs).trim()} = ${casesBlock} \\]`
+    )
+    // Also handle the simpler form "\\( \\[\\begin{cases}...\\end{cases}\\] \\)".
+    .replace(
+      /\\\(\s*\\\[\s*(\\begin\{(cases|dcases|rcases|drcases)\}[\s\S]*?\\end\{\2\})\s*\\\]\s*\\\)/g,
+      (_match, casesBlock) => `\\[\n${casesBlock}\n\\]`
+    );
+
 const repairTrailingForClauseOutsideDisplayMath = (value: string) =>
   String(value || '').replace(
     /\\+\](?:\s|\\n|\\r)*\\+quad(?:\s|\\n|\\r)*((?:\\+text(?:\s|\\n|\\r)*\{(?:\s|\\n|\\r)*for(?:\s|\\n|\\r)*\}|for)(?:\s|\\n|\\r)+[\s\S]{1,220}?)(?:\s|\\n|\\r)*\\+\]/g,
@@ -317,7 +330,9 @@ const finalizeCasesSafety = (value: string) =>
   collapseDuplicateDisplayMathDelimiters(
     repairTrailingForClauseOutsideDisplayMath(
       collapseNestedDisplayOpenersBeforeCases(
-        wrapBareCasesBlocksOutsideMath(normalizeCasesTextLabels(String(value || '')))
+        unwrapDisplayMathInsideInlineMathForCases(
+          wrapBareCasesBlocksOutsideMath(normalizeCasesTextLabels(String(value || '')))
+        )
       )
     )
   );
