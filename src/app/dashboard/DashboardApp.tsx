@@ -379,7 +379,15 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [paperIndex, setPaperIndex] = useState(0);
   const [showPaperQuestionNavigator, setShowPaperQuestionNavigator] = useState(false);
   const [showQuestionInfo, setShowQuestionInfo] = useState(false);
-  const [activePaper, setActivePaper] = useState<{ year: string; subject: string; grade: string; school: string; count: number } | null>(null);
+  const [activePaper, setActivePaper] = useState<{
+    year: string;
+    subject: string;
+    grade: string;
+    school: string;
+    count: number;
+    topic?: string;
+    customName?: string;
+  } | null>(null);
   const [exportingPaperPdf, setExportingPaperPdf] = useState<'exam' | 'solutions' | 'autofix' | null>(null);
   const [exportingSavedExamPdf, setExportingSavedExamPdf] = useState<'exam' | 'solutions' | 'solutions-only' | 'autofix' | null>(null);
   const [exportingCustomExamPdf, setExportingCustomExamPdf] = useState<'exam' | 'solutions' | 'solutions-only' | 'latex-tex' | 'latex-zip' | null>(null);
@@ -2737,7 +2745,18 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       const grade = activePaper?.grade || '';
       const title = `${subject} ${mode === 'solutions_only' ? 'Solutions' : (includeSolutions ? 'Solutions' : 'Paper')}`;
       const subtitle = [grade, `${paperQuestions.length} question${paperQuestions.length === 1 ? '' : 's'}`].filter(Boolean).join(' • ');
-      const downloadName = `${activePaper?.year || 'custom'}-${subject}-${grade || 'exam'}`;
+      const normalizedSubject = String(subject || '').toLowerCase();
+      const subjectCode = normalizedSubject.includes('extension 2') || normalizedSubject.includes('ext 2')
+        ? 'ME2'
+        : (normalizedSubject.includes('extension 1') || normalizedSubject.includes('ext 1')
+          ? 'ME1'
+          : (normalizedSubject.includes('standard') ? 'MS' : 'MA'));
+      const gradeToken = String(grade || '').includes('11') ? 'Y11' : 'Y12';
+      const topicLabel = String(activePaper?.topic || paperQuestions[0]?.topic || 'Custom Topic').trim() || 'Custom Topic';
+      const documentLabel = includeQuestionContent
+        ? (includeSolutions ? 'Questions + Solutions' : 'Questions')
+        : 'Solutions';
+      const downloadName = `${gradeToken} ${subjectCode} ${topicLabel} [${documentLabel}]`;
 
       await exportExamQuestionsPdf({
         includeSolutions,
@@ -2755,6 +2774,40 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     } finally {
       setExportingCustomExamPdf(null);
     }
+  };
+
+  const renameCustomExam = (nextTitle: string) => {
+    const trimmed = nextTitle.trim();
+    if (!trimmed) return;
+    setActivePaper((prev) => {
+      if (!prev) return prev;
+      const nextPaper = { ...prev, customName: trimmed };
+      try {
+        const rawSession = sessionStorage.getItem(CUSTOM_EXAM_SESSION_STORAGE_KEY);
+        if (rawSession) {
+          const parsedSession = JSON.parse(rawSession);
+          sessionStorage.setItem(CUSTOM_EXAM_SESSION_STORAGE_KEY, JSON.stringify({
+            ...parsedSession,
+            activePaper: { ...(parsedSession?.activePaper || {}), customName: trimmed },
+          }));
+        }
+      } catch {
+        // no-op: title rename should still work even if storage is unavailable
+      }
+      try {
+        const rawLocal = localStorage.getItem(CUSTOM_EXAM_STORAGE_KEY);
+        if (rawLocal) {
+          const parsedLocal = JSON.parse(rawLocal);
+          localStorage.setItem(CUSTOM_EXAM_STORAGE_KEY, JSON.stringify({
+            ...parsedLocal,
+            activePaper: { ...(parsedLocal?.activePaper || {}), customName: trimmed },
+          }));
+        }
+      } catch {
+        // no-op: title rename should still work even if storage is unavailable
+      }
+      return nextPaper;
+    });
   };
 
   const removeSavedAttempt = (id: number) => {
@@ -4509,7 +4562,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     endExam();
   };
 
-  const startPaperAttempt = (paper: { year: string; subject: string; grade: string; school: string; count: number }) => {
+  const startPaperAttempt = (paper: { year: string; subject: string; grade: string; school: string; count: number; topic?: string; customName?: string }) => {
     const questionPool = browseQuestions.length ? browseQuestions : visibleAllQuestions;
     const matching = questionPool
       .filter(
@@ -4559,6 +4612,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       grade: String(attempt.paperGrade || ''),
       school: 'Saved',
       count: typedQuestions.length,
+      topic: String(typedQuestions[0]?.topic || 'Saved Topic'),
+      customName: String(attempt.paperSubject || 'Saved Exam'),
     });
     setPaperQuestions(typedQuestions);
     setPaperIndex(0);
@@ -4790,7 +4845,17 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         }
       }
 
-      const customPaper = { year: 'Custom', subject: params.subject, grade: params.grade, school: 'Custom', count: orderedSelection.length };
+      const customPaper = {
+        year: 'Custom',
+        subject: params.subject,
+        grade: params.grade,
+        school: 'Custom',
+        count: orderedSelection.length,
+        topic: params.topics.length === 1
+          ? params.topics[0]
+          : (params.topics.length > 1 ? 'Mixed Topics' : (orderedSelection[0]?.topic || 'Custom Topic')),
+        customName: params.topics.length === 1 ? params.topics[0] : `${params.subject} Custom Exam`,
+      };
       const storagePayload = {
         activePaper: customPaper,
         questions: orderedSelection,
@@ -5272,12 +5337,19 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
               )}
               {viewMode === 'exam' && (
                 <CustomExamView
-                  examTitle={activePaper?.subject || 'Custom Exam'}
+                  examTitle={activePaper?.customName || activePaper?.subject || 'Custom Exam'}
                   examMeta={activePaper ? `${activePaper.grade} • ${activePaper.count} questions` : null}
                   questions={paperQuestions}
                   exportingPdf={exportingCustomExamPdf}
                   onExportPdf={exportCustomExamPdf}
+                  onRenameExamTitle={renameCustomExam}
+                  backButtonLabel={activePaper?.school === 'Saved' ? 'Back to Saved Exams' : 'Back to Exam Architect'}
                   onBack={() => {
+                    if (activePaper?.school === 'Saved') {
+                      setViewMode('saved');
+                      router.push('/dashboard/saved');
+                      return;
+                    }
                     setViewMode('builder');
                     router.push('/dashboard/builder');
                   }}

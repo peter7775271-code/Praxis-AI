@@ -2282,8 +2282,11 @@ export async function POST(request: Request) {
       return Response.json({ error: 'At least one question is required to export TeX' }, { status: 400 });
     }
 
-    const safeBase = downloadNameBase.replace(/[^a-z0-9\-_.]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    const baseFilename = `${safeBase || 'custom-exam'}${includeSolutions ? '-with-solutions' : ''}`;
+    const safeBase = downloadNameBase
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const baseFilename = safeBase || 'custom-exam';
 
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'export-exam-pdf-'));
     try {
@@ -2315,7 +2318,7 @@ export async function POST(request: Request) {
           tempDir,
           questions: enrichedQuestions,
         });
-        const filename = `${baseFilename}-latex-assets.zip`;
+        const filename = `${baseFilename}.zip`;
         return new Response(new Uint8Array(zipBuffer), {
           status: 200,
           headers: {

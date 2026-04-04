@@ -5,6 +5,7 @@ import React from 'react';
 import {
   ArrowLeft, BookOpen, ChevronRight, ChevronLeft, RefreshCw, Eye, Download, Bookmark,
   CheckCircle2, XCircle, TrendingUp, Edit2, Target, ChevronDown, ChevronUp,
+  Trash2,
   PanelLeftClose, PanelLeftOpen, Award, Clock, Hash
 } from 'lucide-react';
 import { LatexText, QuestionTextWithDividers } from '../question-text-with-dividers';
@@ -656,8 +657,19 @@ export default function SavedView({
                         <div className="grid gap-4 sm:grid-cols-2">
                           {savedAttempts.map((attempt) => {
                             const isExam = attempt.type === 'exam';
-                            const pct = isExam && attempt.totalPossible > 0 ? Math.round((attempt.totalScore / attempt.totalPossible) * 100) : null;
                             const savedDate = attempt.savedAt ? new Date(attempt.savedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+                            const examTopics = isExam
+                              ? Array.from(
+                                  new Set(
+                                    (attempt.examAttempts || [])
+                                      .map((entry: any) => String(entry?.question?.topic || '').trim())
+                                      .filter(Boolean)
+                                  )
+                                )
+                              : [];
+                            const topicsLabel = examTopics.length ? examTopics.join(', ') : 'Not specified';
+                            const subjectGradeLabel = [attempt.paperSubject, attempt.paperGrade].filter(Boolean).join(' • ') || 'Not specified';
+                            const questionCount = attempt.examAttempts?.length ?? 0;
                             return (
                               <div
                                 key={attempt.id}
@@ -697,16 +709,8 @@ export default function SavedView({
                                         {isExam ? attempt.paperGrade : attempt.topic}
                                       </p>
                                     </div>
-                                    {/* Score badge */}
                                     <div className="flex-shrink-0 text-right">
-                                      {isExam ? (
-                                        <div>
-                                          <div className="text-xl font-bold leading-none" style={{ color: 'var(--clr-primary-a50)' }}>
-                                            {attempt.totalScore}<span className="text-sm font-medium" style={{ color: 'var(--clr-surface-a40)' }}>/{attempt.totalPossible}</span>
-                                          </div>
-                                          {pct !== null && <div className="text-xs font-semibold mt-0.5" style={{ color: 'var(--clr-surface-a40)' }}>{pct}%</div>}
-                                        </div>
-                                      ) : (
+                                      {!isExam && (
                                         <div className="text-xl font-bold leading-none" style={{ color: 'var(--clr-primary-a50)' }}>
                                           {attempt.marks}<span className="text-xs font-medium" style={{ color: 'var(--clr-surface-a40)' }}> marks</span>
                                         </div>
@@ -714,21 +718,13 @@ export default function SavedView({
                                     </div>
                                   </div>
 
-                                  {/* Exam progress bar */}
-                                  {isExam && pct !== null && (
-                                    <div className="mb-3 rounded-full overflow-hidden" style={{ height: 4, backgroundColor: 'var(--clr-surface-tonal-a20)' }}>
-                                      <div
-                                        className="h-full rounded-full"
-                                        style={{ width: `${pct}%`, backgroundColor: 'var(--clr-primary-a50)' }}
-                                      />
-                                    </div>
-                                  )}
-
                                   {/* Exam meta */}
                                   {isExam && (
-                                    <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--clr-surface-a50)' }}>
-                                      <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{attempt.examAttempts?.length ?? 0} questions</span>
-                                      {savedDate && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{savedDate}</span>}
+                                    <div className="border-t pt-2.5 mt-2.5 space-y-2 text-xs" style={{ borderColor: 'var(--clr-surface-tonal-a20)', color: 'var(--clr-surface-a50)' }}>
+                                      {savedDate && <p className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" />Created: {savedDate}</p>}
+                                      <p className="flex items-center gap-1.5"><BookOpen className="w-3.5 h-3.5" />Subject/Grade: {subjectGradeLabel}</p>
+                                      <p className="flex items-center gap-1.5"><Hash className="w-3.5 h-3.5" />Questions: {questionCount}</p>
+                                      <p className="line-clamp-2">Topics selected: {topicsLabel}</p>
                                     </div>
                                   )}
 
@@ -755,10 +751,11 @@ export default function SavedView({
                                 <div className="px-5 pb-4">
                                   <button
                                     onClick={(e) => { e.stopPropagation(); removeSavedAttempt(attempt.id); }}
-                                  View in Exam Viewer
+                                    className="inline-flex items-center gap-1.5 text-sm font-medium cursor-pointer transition-colors"
                                     style={{ color: 'var(--clr-surface-a50)' }}
                                   >
-                                    Unsave
+                                    <Trash2 className="w-4 h-4" />
+                                    Delete
                                   </button>
                                 </div>
                               </div>

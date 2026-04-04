@@ -1,8 +1,14 @@
 'use client';
 
 import React from 'react';
-import { ArrowLeft, BookOpen, Copy, Download, Eye, EyeOff, Image, Info } from 'lucide-react';
+import { ArrowLeft, Archive, BookOpen, Check, Copy, Download, Eye, EyeOff, FileText, Image, Info, Pencil, ScrollText, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { formatPartDividerPlaceholder, LatexText, QuestionTextWithDividers } from '../question-text-with-dividers';
 import { stripOuterBraces } from '../view-helpers';
 
@@ -306,6 +312,8 @@ export default function CustomExamView({
   questions,
   exportingPdf,
   onExportPdf,
+  onRenameExamTitle,
+  backButtonLabel = 'Back to Exam Architect',
   onBack,
 }: {
   examTitle: string;
@@ -313,10 +321,34 @@ export default function CustomExamView({
   questions: CustomExamQuestion[];
   exportingPdf: 'exam' | 'solutions' | 'solutions-only' | 'latex-tex' | 'latex-zip' | null;
   onExportPdf: (mode: 'questions' | 'questions_with_solutions' | 'solutions_only' | 'raw_latex_tex' | 'raw_latex_zip') => Promise<void>;
+  onRenameExamTitle?: (nextTitle: string) => void;
+  backButtonLabel?: string;
   onBack: () => void;
 }) {
   const [showSolutions, setShowSolutions] = React.useState(false);
   const [questionActionStatus, setQuestionActionStatus] = React.useState<Record<string, string>>({});
+  const [isEditingTitle, setIsEditingTitle] = React.useState(false);
+  const [titleDraft, setTitleDraft] = React.useState(examTitle);
+
+  React.useEffect(() => {
+    setTitleDraft(examTitle);
+  }, [examTitle]);
+
+  const handleSaveTitle = React.useCallback(() => {
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle) {
+      setTitleDraft(examTitle);
+      setIsEditingTitle(false);
+      return;
+    }
+    onRenameExamTitle?.(nextTitle);
+    setIsEditingTitle(false);
+  }, [examTitle, onRenameExamTitle, titleDraft]);
+
+  const handleCancelTitleEdit = React.useCallback(() => {
+    setTitleDraft(examTitle);
+    setIsEditingTitle(false);
+  }, [examTitle]);
 
   const setActionStatus = React.useCallback((questionId: string, message: string) => {
     setQuestionActionStatus((prev) => ({ ...prev, [questionId]: message }));
@@ -400,6 +432,8 @@ export default function CustomExamView({
     return grouped;
   }, [questions]);
 
+  const exportDisabled = exportingPdf !== null || !displayQuestions.length;
+
   return (
     <div className="max-w-6xl mx-auto space-y-8">
       <div className="flex flex-col gap-5 rounded-[2rem] border border-neutral-200 bg-white p-6 shadow-sm md:p-8">
@@ -411,72 +445,156 @@ export default function CustomExamView({
               className="inline-flex items-center gap-2 text-sm font-medium text-neutral-500 transition hover:text-neutral-900 cursor-pointer"
             >
               <ArrowLeft className="h-4 w-4" />
-              Back to Exam Architect
+              {backButtonLabel}
             </button>
             <div className="space-y-2">
               <p className="text-xs font-bold uppercase tracking-[0.3em] text-neutral-400">Generated exam</p>
-              <h1 className="text-4xl font-light text-neutral-900">
-                {examTitle} <span className="font-bold italic">Questions</span>
-              </h1>
+              <div className="flex flex-wrap items-center gap-3">
+                {isEditingTitle ? (
+                  <>
+                    <input
+                      type="text"
+                      value={titleDraft}
+                      onChange={(event) => setTitleDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') handleSaveTitle();
+                        if (event.key === 'Escape') handleCancelTitleEdit();
+                      }}
+                      className="min-w-[18rem] flex-1 rounded-xl border border-neutral-300 bg-white px-4 py-2 text-2xl font-medium text-neutral-900 outline-none transition focus:border-neutral-500"
+                      aria-label="Custom exam title"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveTitle}
+                      className="inline-flex items-center justify-center rounded-full border border-neutral-900 bg-neutral-900 p-2 text-white transition hover:bg-neutral-800 cursor-pointer"
+                      aria-label="Save exam title"
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelTitleEdit}
+                      className="inline-flex items-center justify-center rounded-full border border-neutral-300 bg-white p-2 text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
+                      aria-label="Cancel exam title edit"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <h1 className="text-4xl font-light text-neutral-900">
+                      {examTitle} <span className="font-bold italic">Questions</span>
+                    </h1>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingTitle(true)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Rename
+                    </button>
+                  </>
+                )}
+              </div>
               {examMeta ? <p className="text-sm text-neutral-500">{examMeta}</p> : null}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowSolutions((prev) => !prev)}
-            className="inline-flex items-center justify-center gap-2 rounded-full bg-neutral-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 cursor-pointer"
-          >
-            {showSolutions ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            {showSolutions ? 'Hide Solutions' : 'View Solutions'}
-          </button>
-        </div>
+          <div className="flex flex-col items-start gap-3 md:items-end">
+            <button
+              type="button"
+              onClick={() => setShowSolutions((prev) => !prev)}
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-neutral-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 cursor-pointer"
+            >
+              {showSolutions ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {showSolutions ? 'Hide Solutions' : 'View Solutions'}
+            </button>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => onExportPdf('raw_latex_tex')}
-            disabled={exportingPdf !== null || !displayQuestions.length}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
-          >
-            <Download className="h-4 w-4" />
-            {exportingPdf === 'latex-tex' ? 'Exporting…' : 'Raw LaTeX (.tex)'}
-          </button>
-          <button
-            type="button"
-            onClick={() => onExportPdf('questions')}
-            disabled={exportingPdf !== null || !displayQuestions.length}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
-          >
-            <Download className="h-4 w-4" />
-            {exportingPdf === 'exam' ? 'Exporting…' : 'Questions only'}
-          </button>
-          <button
-            type="button"
-            onClick={() => onExportPdf('questions_with_solutions')}
-            disabled={exportingPdf !== null || !displayQuestions.length}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-900 bg-neutral-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
-          >
-            <Download className="h-4 w-4" />
-            {exportingPdf === 'solutions' ? 'Exporting…' : 'Questions + solutions'}
-          </button>
-          <button
-            type="button"
-            onClick={() => onExportPdf('solutions_only')}
-            disabled={exportingPdf !== null || !displayQuestions.length}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
-          >
-            <Download className="h-4 w-4" />
-            {exportingPdf === 'solutions-only' ? 'Exporting…' : 'Solutions only'}
-          </button>
-          <button
-            type="button"
-            onClick={() => onExportPdf('raw_latex_zip')}
-            disabled={exportingPdf !== null || !displayQuestions.length}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
-          >
-            <Download className="h-4 w-4" />
-            {exportingPdf === 'latex-zip' ? 'Exporting…' : 'Raw LaTeX + images ZIP'}
-          </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  disabled={exportDisabled}
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+                >
+                  <Download className="h-4 w-4" />
+                  {exportingPdf ? 'Exporting…' : 'Download'}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80 rounded-2xl border-neutral-200 bg-white p-2 shadow-lg">
+                <DropdownMenuItem
+                  onSelect={() => onExportPdf('questions')}
+                  disabled={exportDisabled}
+                  className="group rounded-xl px-3 py-2.5 text-neutral-800 outline-none transition data-[highlighted]:bg-neutral-100 data-[highlighted]:text-neutral-900"
+                >
+                  <div className="flex w-full items-start gap-2.5">
+                    <FileText className="mt-0.5 h-4 w-4 shrink-0 text-neutral-500 transition group-data-[highlighted]:text-neutral-900" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold">Questions only</p>
+                      <p className="text-xs text-neutral-500">Export the exam paper without solutions.</p>
+                    </div>
+                    {exportingPdf === 'exam' ? <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-white">Exporting</span> : null}
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => onExportPdf('questions_with_solutions')}
+                  disabled={exportDisabled}
+                  className="group rounded-xl px-3 py-2.5 text-neutral-800 outline-none transition data-[highlighted]:bg-neutral-100 data-[highlighted]:text-neutral-900"
+                >
+                  <div className="flex w-full items-start gap-2.5">
+                    <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-neutral-500 transition group-data-[highlighted]:text-neutral-900" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold">Questions + solutions</p>
+                      <p className="text-xs text-neutral-500">One document with answers included after each question.</p>
+                    </div>
+                    {exportingPdf === 'solutions' ? <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-white">Exporting</span> : null}
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => onExportPdf('solutions_only')}
+                  disabled={exportDisabled}
+                  className="group rounded-xl px-3 py-2.5 text-neutral-800 outline-none transition data-[highlighted]:bg-neutral-100 data-[highlighted]:text-neutral-900"
+                >
+                  <div className="flex w-full items-start gap-2.5">
+                    <ScrollText className="mt-0.5 h-4 w-4 shrink-0 text-neutral-500 transition group-data-[highlighted]:text-neutral-900" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold">Solutions only</p>
+                      <p className="text-xs text-neutral-500">Answer key only for marking and revision.</p>
+                    </div>
+                    {exportingPdf === 'solutions-only' ? <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-white">Exporting</span> : null}
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => onExportPdf('raw_latex_tex')}
+                  disabled={exportDisabled}
+                  className="group rounded-xl px-3 py-2.5 text-neutral-800 outline-none transition data-[highlighted]:bg-neutral-100 data-[highlighted]:text-neutral-900"
+                >
+                  <div className="flex w-full items-start gap-2.5">
+                    <FileText className="mt-0.5 h-4 w-4 shrink-0 text-neutral-500 transition group-data-[highlighted]:text-neutral-900" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold">Raw LaTeX (.tex)</p>
+                      <p className="text-xs text-neutral-500">Single TeX source for manual editing.</p>
+                    </div>
+                    {exportingPdf === 'latex-tex' ? <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-white">Exporting</span> : null}
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => onExportPdf('raw_latex_zip')}
+                  disabled={exportDisabled}
+                  className="group rounded-xl px-3 py-2.5 text-neutral-800 outline-none transition data-[highlighted]:bg-neutral-100 data-[highlighted]:text-neutral-900"
+                >
+                  <div className="flex w-full items-start gap-2.5">
+                    <Archive className="mt-0.5 h-4 w-4 shrink-0 text-neutral-500 transition group-data-[highlighted]:text-neutral-900" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold">Raw LaTeX + images ZIP</p>
+                      <p className="text-xs text-neutral-500">TeX plus all referenced images bundled together.</p>
+                    </div>
+                    {exportingPdf === 'latex-zip' ? <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-white">Exporting</span> : null}
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 border-b border-neutral-100 pb-1">
