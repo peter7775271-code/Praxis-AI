@@ -382,8 +382,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [showQuestionInfo, setShowQuestionInfo] = useState(false);
   const [activePaper, setActivePaper] = useState<{ year: string; subject: string; grade: string; school: string; count: number } | null>(null);
   const [exportingPaperPdf, setExportingPaperPdf] = useState<'exam' | 'solutions' | 'autofix' | null>(null);
-  const [exportingSavedExamPdf, setExportingSavedExamPdf] = useState<'exam' | 'solutions' | 'autofix' | null>(null);
-  const [exportingCustomExamPdf, setExportingCustomExamPdf] = useState<'exam' | 'solutions' | 'autofix' | null>(null);
+  const [exportingSavedExamPdf, setExportingSavedExamPdf] = useState<'exam' | 'solutions' | 'solutions-only' | 'autofix' | null>(null);
+  const [exportingCustomExamPdf, setExportingCustomExamPdf] = useState<'exam' | 'solutions' | 'solutions-only' | 'latex-zip' | null>(null);
   const [examEndsAt, setExamEndsAt] = useState<number | null>(null);
   const [examRemainingMs, setExamRemainingMs] = useState<number | null>(null);
   const [examConditionsActive, setExamConditionsActive] = useState(false);
@@ -2578,17 +2578,21 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
   const exportExamQuestionsPdf = async ({
     includeSolutions,
+    includeQuestionContent = true,
     questions,
     title,
     subtitle,
     downloadName,
+    outputFormat = 'pdf',
     autoFixExport = false,
   }: {
     includeSolutions: boolean;
+    includeQuestionContent?: boolean;
     questions: any[];
     title: string;
     subtitle: string;
     downloadName: string;
+    outputFormat?: 'pdf' | 'tex-zip';
     autoFixExport?: boolean;
   }) => {
     if (!questions.length) {
@@ -2605,7 +2609,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         title,
         subtitle,
         downloadName,
+        format: outputFormat,
         includeSolutions,
+        includeQuestionContent,
         autoFixExport,
         questions,
       }),
@@ -2627,7 +2633,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     const contentType = (response.headers.get('content-type') || '').toLowerCase();
     const filenameMatch = contentDisposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
     const serverFilename = filenameMatch ? decodeURIComponent(filenameMatch[1]) : '';
-    const defaultExt = contentType.includes('application/x-tex') ? '.tex' : '.pdf';
+    const defaultExt = contentType.includes('application/zip')
+      ? '.zip'
+      : (contentType.includes('application/x-tex') ? '.tex' : '.pdf');
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -2707,25 +2715,32 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   };
 
-  const exportCustomExamPdf = async (includeSolutions: boolean, autoFixExport = false) => {
+  const exportCustomExamPdf = async (mode: 'questions' | 'questions_with_solutions' | 'solutions_only' | 'raw_latex_zip') => {
     if (!paperQuestions.length) {
       alert('No custom exam questions are available to export.');
       return;
     }
 
-    const mode: 'exam' | 'solutions' | 'autofix' = autoFixExport ? 'autofix' : (includeSolutions ? 'solutions' : 'exam');
-    setExportingCustomExamPdf(mode);
+    const includeSolutions = mode === 'questions_with_solutions' || mode === 'solutions_only';
+    const includeQuestionContent = mode !== 'solutions_only';
+    const outputFormat: 'pdf' | 'tex-zip' = mode === 'raw_latex_zip' ? 'tex-zip' : 'pdf';
+    const exportMode: 'exam' | 'solutions' | 'solutions-only' | 'latex-zip' = mode === 'raw_latex_zip'
+      ? 'latex-zip'
+      : (mode === 'solutions_only' ? 'solutions-only' : (includeSolutions ? 'solutions' : 'exam'));
+    setExportingCustomExamPdf(exportMode);
 
     try {
       const subject = activePaper?.subject || 'Custom Exam';
       const grade = activePaper?.grade || '';
-      const title = `${subject} ${includeSolutions ? 'Solutions' : 'Paper'}`;
+      const title = `${subject} ${mode === 'solutions_only' ? 'Solutions' : (includeSolutions ? 'Solutions' : 'Paper')}`;
       const subtitle = [grade, `${paperQuestions.length} question${paperQuestions.length === 1 ? '' : 's'}`].filter(Boolean).join(' • ');
       const downloadName = `${activePaper?.year || 'custom'}-${subject}-${grade || 'exam'}`;
 
       await exportExamQuestionsPdf({
         includeSolutions,
-        autoFixExport,
+        includeQuestionContent,
+        outputFormat,
+        autoFixExport: false,
         questions: paperQuestions,
         title,
         subtitle,

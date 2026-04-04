@@ -1710,6 +1710,7 @@ const buildExamLatex = ({
   title,
   subtitle,
   includeSolutions,
+  includeQuestionContent = true,
   questions,
   compileSafeMode = false,
   plainTextMode = false,
@@ -1717,6 +1718,7 @@ const buildExamLatex = ({
   title: string;
   subtitle: string;
   includeSolutions: boolean;
+  includeQuestionContent?: boolean;
   questions: ExportQuestion[];
   compileSafeMode?: boolean;
   plainTextMode?: boolean;
@@ -1762,12 +1764,13 @@ const buildExamLatex = ({
     skipQuestionText = false
   ) => {
     const questionType = question.question_type || 'written';
-    if (!skipQuestionText) {
+    const shouldRenderQuestionContent = !skipQuestionText;
+    if (shouldRenderQuestionContent) {
       const questionText = renderBody(String(question.question_text || ''));
       lines.push(`${inlinePrefix}${questionText || 'No question text provided.'}`);
       lines.push('');
     }
-    if (question.graph_image_file) {
+    if (shouldRenderQuestionContent && question.graph_image_file) {
       lines.push('\\begin{center}');
       lines.push(`\\includegraphics[draft=false,width=${imageWidthBySize(question.graph_image_size)}]{${question.graph_image_file}}`);
       lines.push('\\end{center}');
@@ -1775,45 +1778,47 @@ const buildExamLatex = ({
     }
 
     if (questionType === 'multiple_choice') {
-      const options: Array<{ label: 'A' | 'B' | 'C' | 'D'; value: string; imageFile?: string | null }> = [
-        {
-          label: 'A',
-          value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_a || '').trim())),
-          imageFile: question.mcq_option_a_image_file,
-        },
-        {
-          label: 'B',
-          value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_b || '').trim())),
-          imageFile: question.mcq_option_b_image_file,
-        },
-        {
-          label: 'C',
-          value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_c || '').trim())),
-          imageFile: question.mcq_option_c_image_file,
-        },
-        {
-          label: 'D',
-          value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_d || '').trim())),
-          imageFile: question.mcq_option_d_image_file,
-        },
-      ];
-      lines.push('\\begin{enumerate}[label=\\textbf{(\\Alph*)}]');
-      for (const option of options) {
-        lines.push('\\item');
-        if (option.value) {
-          lines.push(option.value);
+      if (shouldRenderQuestionContent) {
+        const options: Array<{ label: 'A' | 'B' | 'C' | 'D'; value: string; imageFile?: string | null }> = [
+          {
+            label: 'A',
+            value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_a || '').trim())),
+            imageFile: question.mcq_option_a_image_file,
+          },
+          {
+            label: 'B',
+            value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_b || '').trim())),
+            imageFile: question.mcq_option_b_image_file,
+          },
+          {
+            label: 'C',
+            value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_c || '').trim())),
+            imageFile: question.mcq_option_c_image_file,
+          },
+          {
+            label: 'D',
+            value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_d || '').trim())),
+            imageFile: question.mcq_option_d_image_file,
+          },
+        ];
+        lines.push('\\begin{enumerate}[label=\\textbf{(\\Alph*)}]');
+        for (const option of options) {
+          lines.push('\\item');
+          if (option.value) {
+            lines.push(option.value);
+          }
+          if (option.imageFile) {
+            lines.push('\\begin{center}');
+            lines.push(`\\includegraphics[draft=false,width=0.30\\textwidth]{${option.imageFile}}`);
+            lines.push('\\end{center}');
+          }
+          if (!option.value && !option.imageFile) {
+            lines.push(' ');
+          }
         }
-        if (option.imageFile) {
-          lines.push('\\begin{center}');
-          lines.push(`\\includegraphics[draft=false,width=0.30\\textwidth]{${option.imageFile}}`);
-          lines.push('\\end{center}');
-        }
-        if (!option.value && !option.imageFile) {
-          lines.push(' ');
-        }
+        lines.push('\\end{enumerate}');
+        lines.push('');
       }
-      lines.push('\\end{enumerate}');
-      lines.push('');
 
       if (includeSolutions) {
         lines.push('\\subsection*{Solution}');
@@ -1879,14 +1884,18 @@ const buildExamLatex = ({
         const subQ = groupQuestions[gi];
         const subD = groupDetails[gi];
         const subMarks = Number(subQ.marks || 0);
-        const subQuestionText = renderBody(String(subQ.question_text || '')) || 'No question text provided.';
         const sourceQuestionIndex = groupStart + gi;
 
         lines.push(toQuestionMarker(subQ, sourceQuestionIndex));
 
-        lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.roman || '')})} ${subQuestionText}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
+        if (includeQuestionContent) {
+          const subQuestionText = renderBody(String(subQ.question_text || '')) || 'No question text provided.';
+          lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.roman || '')})} ${subQuestionText}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
+        } else {
+          lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.roman || '')})}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
+        }
         lines.push('');
-        renderQuestionContent(subQ, lines, '', true);
+        renderQuestionContent(subQ, lines, '', !includeQuestionContent);
         if (gi < groupQuestions.length - 1) {
           lines.push('\\vspace{0.5em}');
         }
@@ -1919,14 +1928,18 @@ const buildExamLatex = ({
         const subQ = groupQuestions[gi];
         const subD = groupDetails[gi];
         const subMarks = Number(subQ.marks || 0);
-        const subQuestionText = renderBody(String(subQ.question_text || '')) || 'No question text provided.';
         const sourceQuestionIndex = groupStart + gi;
 
         lines.push(toQuestionMarker(subQ, sourceQuestionIndex));
 
-        lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.subPart || '')})} ${subQuestionText}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
+        if (includeQuestionContent) {
+          const subQuestionText = renderBody(String(subQ.question_text || '')) || 'No question text provided.';
+          lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.subPart || '')})} ${subQuestionText}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
+        } else {
+          lines.push(`\\noindent\\textbf{(${escapeLatexText(subD.subPart || '')})}${subMarks > 0 ? `\\hfill\\textbf{${subMarks}}` : ''}`);
+        }
         lines.push('');
-        renderQuestionContent(subQ, lines, '', true);
+        renderQuestionContent(subQ, lines, '', !includeQuestionContent);
         if (gi < groupQuestions.length - 1) {
           lines.push('\\vspace{0.5em}');
         }
@@ -1942,7 +1955,7 @@ const buildExamLatex = ({
       lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
       lines.push(`\\textbf{${escapeLatexText(questionLabel)}}${marksLabel ? ` & \\textbf{${escapeLatexText(marksLabel)}}` : ' & '}\\\\[0.5em]`);
       lines.push('\\end{tabular*}');
-      renderQuestionContent(question, lines);
+      renderQuestionContent(question, lines, '', !includeQuestionContent);
       lines.push('\\vspace{0.9em}');
       bodyParts.push(['\\filbreak', lines.join('\n')].join('\n'));
       cursor += 1;
@@ -2004,6 +2017,27 @@ const buildExamLatex = ({
 ${body}
 
 \\end{document}`;
+};
+
+const buildTexAssetZip = async ({
+  tex,
+  tempDir,
+  questions,
+}: {
+  tex: string;
+  tempDir: string;
+  questions: ExportQuestion[];
+}) => {
+  const texPath = path.join(tempDir, LOCAL_TEX_FILENAME);
+  const zipPath = path.join(tempDir, 'exam-assets.zip');
+  const referencedAssets = getReferencedAssetFilenames(questions);
+  await writeFile(texPath, tex, 'utf8');
+  const zipArgs = ['-q', '-j', zipPath, LOCAL_TEX_FILENAME, ...referencedAssets];
+  await execFileAsync('zip', zipArgs, {
+    cwd: tempDir,
+    timeout: PDF_COMPILE_TIMEOUT_MS,
+  });
+  return readFile(zipPath);
 };
 
 const compileTexToPdfLocal = async ({
@@ -2195,7 +2229,9 @@ export async function POST(request: Request) {
     const downloadNameBase = String(body?.downloadName || 'custom-exam').trim() || 'custom-exam';
     const outputFormat = String(body?.format || 'pdf').trim().toLowerCase();
     const wantsTex = outputFormat === 'tex';
+    const wantsTexZip = outputFormat === 'tex-zip';
     const autoFixExport = Boolean(body?.autoFixExport);
+    const includeQuestionContent = body?.includeQuestionContent === undefined ? true : Boolean(body?.includeQuestionContent);
 
     if (!questions.length) {
       return Response.json({ error: 'At least one question is required to export TeX' }, { status: 400 });
@@ -2212,6 +2248,7 @@ export async function POST(request: Request) {
         title,
         subtitle,
         includeSolutions,
+        includeQuestionContent,
         questions: enrichedQuestions,
       });
 
@@ -2227,6 +2264,23 @@ export async function POST(request: Request) {
         });
       }
 
+      if (wantsTexZip) {
+        const zipBuffer = await buildTexAssetZip({
+          tex: primaryTex,
+          tempDir,
+          questions: enrichedQuestions,
+        });
+        const filename = `${baseFilename}-latex-assets.zip`;
+        return new Response(zipBuffer, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/zip',
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            'Cache-Control': 'no-store',
+          },
+        });
+      }
+
       const attempts: Array<{ label: string; tex: string }> = [
         { label: 'standard', tex: primaryTex },
         {
@@ -2235,6 +2289,7 @@ export async function POST(request: Request) {
             title,
             subtitle,
             includeSolutions,
+            includeQuestionContent,
             questions: enrichedQuestions,
             compileSafeMode: true,
           }),
@@ -2248,6 +2303,7 @@ export async function POST(request: Request) {
             title,
             subtitle,
             includeSolutions,
+            includeQuestionContent,
             questions: enrichedQuestions,
             compileSafeMode: true,
             plainTextMode: true,
@@ -2312,6 +2368,7 @@ export async function POST(request: Request) {
                 title,
                 subtitle,
                 includeSolutions,
+                includeQuestionContent,
                 questions: rewrittenQuestions,
               }),
             },
@@ -2321,6 +2378,7 @@ export async function POST(request: Request) {
                 title,
                 subtitle,
                 includeSolutions,
+                includeQuestionContent,
                 questions: rewrittenQuestions,
                 compileSafeMode: true,
               }),
@@ -2334,6 +2392,7 @@ export async function POST(request: Request) {
                 title,
                 subtitle,
                 includeSolutions,
+                includeQuestionContent,
                 questions: rewrittenQuestions,
                 compileSafeMode: true,
                 plainTextMode: true,
