@@ -2590,6 +2590,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     title,
     subtitle,
     downloadName,
+    paperSubject,
+    paperGrade,
     outputFormat = 'pdf',
     autoFixExport = false,
   }: {
@@ -2599,6 +2601,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     title: string;
     subtitle: string;
     downloadName: string;
+    paperSubject?: string;
+    paperGrade?: string;
     outputFormat?: 'pdf' | 'tex' | 'tex-zip';
     autoFixExport?: boolean;
   }) => {
@@ -2620,6 +2624,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         includeSolutions,
         includeQuestionContent,
         autoFixExport,
+        paperSubject,
+        paperGrade,
         questions,
       }),
     });
@@ -2674,6 +2680,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         title,
         subtitle,
         downloadName,
+        paperSubject: activePaper.subject,
+        paperGrade: activePaper.grade,
       });
     } catch (err) {
       console.error('Error exporting paper PDF:', err);
@@ -2713,6 +2721,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         title,
         subtitle,
         downloadName,
+        paperSubject: selectedAttempt.paperSubject || '',
+        paperGrade: selectedAttempt.paperGrade || '',
       });
     } catch (err) {
       console.error('Error exporting saved exam PDF:', err);
@@ -2767,6 +2777,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         title,
         subtitle,
         downloadName,
+        paperSubject: subject,
+        paperGrade: grade,
       });
     } catch (err) {
       console.error('Error exporting custom exam PDF:', err);

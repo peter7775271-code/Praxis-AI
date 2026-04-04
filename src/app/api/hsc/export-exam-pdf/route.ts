@@ -1360,6 +1360,27 @@ const getRomanDisplayBase = (questionNumber: string | null | undefined) => {
   return `${withRoman[1]}(${withRoman[2].toLowerCase()})`;
 };
 
+const isYear12AdvancedPaper = ({
+  paperSubject,
+  paperGrade,
+  subtitle,
+}: {
+  paperSubject: string;
+  paperGrade: string;
+  subtitle: string;
+}) => {
+  const normalizedSubject = String(paperSubject || '').toLowerCase().trim();
+  const normalizedGrade = String(paperGrade || '').toLowerCase().trim();
+  const normalizedSubtitle = String(subtitle || '').toLowerCase().trim();
+
+  const subjectText = [normalizedSubject, normalizedSubtitle].filter(Boolean).join(' ');
+  const gradeText = [normalizedGrade, normalizedSubtitle].filter(Boolean).join(' ');
+  const isYear12 = /year\s*12|\by12\b/.test(gradeText);
+  const isAdvancedMath = /math(?:ematics)?\s+advanced|advanced\s+math(?:ematics)?/.test(subjectText);
+
+  return isYear12 && isAdvancedMath;
+};
+
 const toQuestionMarker = (question: ExportQuestion, index: number) => {
   const questionNumber = String(question.question_number || index + 1)
     .replace(/\s+/g, '')
@@ -1727,6 +1748,8 @@ const getReferencedAssetFilenames = (questions: ExportQuestion[]) => {
 const buildExamLatex = ({
   title,
   subtitle,
+  paperSubject = '',
+  paperGrade = '',
   includeSolutions,
   includeQuestionContent = true,
   questions,
@@ -1735,6 +1758,8 @@ const buildExamLatex = ({
 }: {
   title: string;
   subtitle: string;
+  paperSubject?: string;
+  paperGrade?: string;
   includeSolutions: boolean;
   includeQuestionContent?: boolean;
   questions: ExportQuestion[];
@@ -1762,21 +1787,22 @@ const buildExamLatex = ({
     );
   };
 
-  const explicitGroupIds = questions.map((question) => String(question.group_id || question.question_group_id || '').trim());
-  const explicitGroupCounts = new Map<string, number>();
-  for (const groupId of explicitGroupIds) {
-    if (!groupId) continue;
-    explicitGroupCounts.set(groupId, (explicitGroupCounts.get(groupId) || 0) + 1);
-  }
+  const shouldGroupLetterSubparts = isYear12AdvancedPaper({
+    paperSubject,
+    paperGrade,
+    subtitle,
+  });
 
   let nextQuestionNumber = 1;
   let lastRelatedKey: string | null = null;
   let lastMappedMain: number | null = null;
-  const parsedDetails = questions.map((question, index) => {
+  const parsedDetails = questions.map((question) => {
     const details = parseQuestionNumberForDisplay(question.question_number);
-    const explicitGroupId = explicitGroupIds[index];
-    const isRelatedGroup = Boolean(explicitGroupId) && (explicitGroupCounts.get(explicitGroupId) || 0) > 1;
-    const relatedKey = isRelatedGroup ? `gid:${explicitGroupId}` : null;
+    const baseKey = details.baseKey;
+    const relatedKey = shouldGroupLetterSubparts
+      ? (baseKey && details.subPart ? `letter:${baseKey}` : null)
+      : (baseKey && details.subPart && details.roman ? `roman:${baseKey}:${details.subPart}` : null);
+    const isRelatedGroup = Boolean(relatedKey);
 
     let mappedMain: number;
     if (relatedKey) {
@@ -2271,6 +2297,8 @@ export async function POST(request: Request) {
     const includeSolutions = Boolean(body?.includeSolutions);
     const title = String(body?.title || 'Custom Exam').trim();
     const subtitle = String(body?.subtitle || '').trim();
+    const paperSubject = String(body?.paperSubject || '').trim();
+    const paperGrade = String(body?.paperGrade || '').trim();
     const downloadNameBase = String(body?.downloadName || 'custom-exam').trim() || 'custom-exam';
     const outputFormat = String(body?.format || 'pdf').trim().toLowerCase();
     const wantsTex = outputFormat === 'tex';
@@ -2295,6 +2323,8 @@ export async function POST(request: Request) {
       const primaryTex = buildExamLatex({
         title,
         subtitle,
+        paperSubject,
+        paperGrade,
         includeSolutions,
         includeQuestionContent,
         questions: enrichedQuestions,
@@ -2336,6 +2366,8 @@ export async function POST(request: Request) {
           tex: buildExamLatex({
             title,
             subtitle,
+            paperSubject,
+            paperGrade,
             includeSolutions,
             includeQuestionContent,
             questions: enrichedQuestions,
@@ -2350,6 +2382,8 @@ export async function POST(request: Request) {
           tex: buildExamLatex({
             title,
             subtitle,
+            paperSubject,
+            paperGrade,
             includeSolutions,
             includeQuestionContent,
             questions: enrichedQuestions,
@@ -2415,6 +2449,8 @@ export async function POST(request: Request) {
               tex: buildExamLatex({
                 title,
                 subtitle,
+                paperSubject,
+                paperGrade,
                 includeSolutions,
                 includeQuestionContent,
                 questions: rewrittenQuestions,
@@ -2425,6 +2461,8 @@ export async function POST(request: Request) {
               tex: buildExamLatex({
                 title,
                 subtitle,
+                paperSubject,
+                paperGrade,
                 includeSolutions,
                 includeQuestionContent,
                 questions: rewrittenQuestions,
@@ -2439,6 +2477,8 @@ export async function POST(request: Request) {
               tex: buildExamLatex({
                 title,
                 subtitle,
+                paperSubject,
+                paperGrade,
                 includeSolutions,
                 includeQuestionContent,
                 questions: rewrittenQuestions,

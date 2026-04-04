@@ -81,6 +81,23 @@ const formatRawLatexForQuestion = (question: DisplayExamQuestion) => {
   return question.question_text;
 };
 
+const formatSampleAnswerLatexForQuestion = (question: DisplayExamQuestion) => {
+  if (question.question_type === 'multiple_choice') {
+    return String(question.mcq_explanation || '').trim();
+  }
+
+  if (question.grouped_subparts.length > 0) {
+    const groupedAnswers = question.grouped_subparts
+      .filter((subpart) => String(subpart.sample_answer || '').trim())
+      .map((subpart) => `${subpart.label}\n${String(subpart.sample_answer || '').trim()}`)
+      .join('\n\n');
+
+    if (groupedAnswers.trim()) return groupedAnswers;
+  }
+
+  return String(question.sample_answer || '').trim();
+};
+
 const getMcqOptions = (question: CustomExamQuestion) => (
   [
     { label: 'A' as const, text: stripOuterBraces(question.mcq_option_a || ''), image: question.mcq_option_a_image || null },
@@ -368,6 +385,21 @@ export default function CustomExamView({
       setActionStatus(question.id, copied ? 'Raw LaTeX copied.' : 'Unable to copy LaTeX.');
     } catch {
       setActionStatus(question.id, 'Unable to copy LaTeX.');
+    }
+  }, [setActionStatus]);
+
+  const handleCopySampleAnswerLatex = React.useCallback(async (question: DisplayExamQuestion) => {
+    const sampleLatex = formatSampleAnswerLatexForQuestion(question);
+    if (!sampleLatex) {
+      setActionStatus(question.id, 'No sample answer LaTeX for this question.');
+      return;
+    }
+
+    try {
+      const copied = await copyTextToClipboard(sampleLatex);
+      setActionStatus(question.id, copied ? 'Sample answer LaTeX copied.' : 'Unable to copy sample answer LaTeX.');
+    } catch {
+      setActionStatus(question.id, 'Unable to copy sample answer LaTeX.');
     }
   }, [setActionStatus]);
 
@@ -678,6 +710,14 @@ export default function CustomExamView({
                       >
                         <Copy className="h-3.5 w-3.5" />
                         Copy LaTeX
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCopySampleAnswerLatex(question)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        Copy sample LaTeX
                       </button>
                       <button
                         type="button"
