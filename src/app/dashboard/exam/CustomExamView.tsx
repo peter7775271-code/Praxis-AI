@@ -242,8 +242,8 @@ export default function CustomExamView({
   examTitle: string;
   examMeta?: string | null;
   questions: CustomExamQuestion[];
-  exportingPdf: 'exam' | 'solutions' | 'autofix' | null;
-  onExportPdf: (includeSolutions: boolean, autoFixExport?: boolean) => Promise<void>;
+  exportingPdf: 'exam' | 'solutions' | 'solutions-only' | 'latex-zip' | null;
+  onExportPdf: (mode: 'questions' | 'questions_with_solutions' | 'solutions_only' | 'raw_latex_zip') => Promise<void>;
   onBack: () => void;
 }) {
   const [showSolutions, setShowSolutions] = React.useState(false);
@@ -307,30 +307,39 @@ export default function CustomExamView({
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={() => onExportPdf(false)}
+            onClick={() => onExportPdf('questions')}
             disabled={exportingPdf !== null || !displayQuestions.length}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
           >
             <Download className="h-4 w-4" />
-            {exportingPdf === 'exam' ? 'Exporting Questions PDF…' : 'Export Questions PDF'}
+            {exportingPdf === 'exam' ? 'Exporting…' : 'Questions only'}
           </button>
           <button
             type="button"
-            onClick={() => onExportPdf(true)}
+            onClick={() => onExportPdf('questions_with_solutions')}
             disabled={exportingPdf !== null || !displayQuestions.length}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-900 bg-neutral-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
           >
             <Download className="h-4 w-4" />
-            {exportingPdf === 'solutions' ? 'Exporting Solutions PDF…' : 'Export Questions + Solutions PDF'}
+            {exportingPdf === 'solutions' ? 'Exporting…' : 'Questions + solutions'}
           </button>
           <button
             type="button"
-            onClick={() => onExportPdf(false, true)}
+            onClick={() => onExportPdf('solutions_only')}
             disabled={exportingPdf !== null || !displayQuestions.length}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-amber-500 bg-amber-50 px-5 py-3 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
           >
             <Download className="h-4 w-4" />
-            {exportingPdf === 'autofix' ? 'Auto-fixing & Exporting…' : 'Export PDF (Auto-fix LaTeX)'}
+            {exportingPdf === 'solutions-only' ? 'Exporting…' : 'Solutions only'}
+          </button>
+          <button
+            type="button"
+            onClick={() => onExportPdf('raw_latex_zip')}
+            disabled={exportingPdf !== null || !displayQuestions.length}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+          >
+            <Download className="h-4 w-4" />
+            {exportingPdf === 'latex-zip' ? 'Exporting…' : 'Raw LaTeX + images ZIP'}
           </button>
         </div>
 
