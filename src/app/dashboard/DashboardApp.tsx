@@ -382,7 +382,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [activePaper, setActivePaper] = useState<{ year: string; subject: string; grade: string; school: string; count: number } | null>(null);
   const [exportingPaperPdf, setExportingPaperPdf] = useState<'exam' | 'solutions' | 'autofix' | null>(null);
   const [exportingSavedExamPdf, setExportingSavedExamPdf] = useState<'exam' | 'solutions' | 'solutions-only' | 'autofix' | null>(null);
-  const [exportingCustomExamPdf, setExportingCustomExamPdf] = useState<'exam' | 'solutions' | 'solutions-only' | 'latex-zip' | null>(null);
+  const [exportingCustomExamPdf, setExportingCustomExamPdf] = useState<'exam' | 'solutions' | 'solutions-only' | 'latex-tex' | 'latex-zip' | null>(null);
   const [examEndsAt, setExamEndsAt] = useState<number | null>(null);
   const [examRemainingMs, setExamRemainingMs] = useState<number | null>(null);
   const [examConditionsActive, setExamConditionsActive] = useState(false);
@@ -2591,7 +2591,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     title: string;
     subtitle: string;
     downloadName: string;
-    outputFormat?: 'pdf' | 'tex-zip';
+    outputFormat?: 'pdf' | 'tex' | 'tex-zip';
     autoFixExport?: boolean;
   }) => {
     if (!questions.length) {
@@ -2714,7 +2714,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   };
 
-  const exportCustomExamPdf = async (mode: 'questions' | 'questions_with_solutions' | 'solutions_only' | 'raw_latex_zip') => {
+  const exportCustomExamPdf = async (mode: 'questions' | 'questions_with_solutions' | 'solutions_only' | 'raw_latex_tex' | 'raw_latex_zip') => {
     if (!paperQuestions.length) {
       alert('No custom exam questions are available to export.');
       return;
@@ -2722,10 +2722,14 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
     const includeSolutions = mode === 'questions_with_solutions' || mode === 'solutions_only';
     const includeQuestionContent = mode !== 'solutions_only';
-    const outputFormat: 'pdf' | 'tex-zip' = mode === 'raw_latex_zip' ? 'tex-zip' : 'pdf';
-    const exportMode: 'exam' | 'solutions' | 'solutions-only' | 'latex-zip' = mode === 'raw_latex_zip'
+    const outputFormat: 'pdf' | 'tex' | 'tex-zip' = mode === 'raw_latex_zip'
+      ? 'tex-zip'
+      : (mode === 'raw_latex_tex' ? 'tex' : 'pdf');
+    const exportMode: 'exam' | 'solutions' | 'solutions-only' | 'latex-tex' | 'latex-zip' = mode === 'raw_latex_zip'
       ? 'latex-zip'
-      : (mode === 'solutions_only' ? 'solutions-only' : (includeSolutions ? 'solutions' : 'exam'));
+      : (mode === 'raw_latex_tex'
+        ? 'latex-tex'
+        : (mode === 'solutions_only' ? 'solutions-only' : (includeSolutions ? 'solutions' : 'exam')));
     setExportingCustomExamPdf(exportMode);
 
     try {

@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
 import OpenAI from 'openai';
+import JSZip from 'jszip';
 
 export const runtime = 'nodejs';
 
@@ -2062,16 +2063,26 @@ const buildTexAssetZip = async ({
   tempDir: string;
   questions: ExportQuestion[];
 }) => {
-  const texPath = path.join(tempDir, LOCAL_TEX_FILENAME);
-  const zipPath = path.join(tempDir, 'exam-assets.zip');
+  const zip = new JSZip();
   const referencedAssets = getReferencedAssetFilenames(questions);
-  await writeFile(texPath, tex, 'utf8');
-  const zipArgs = ['-q', '-j', zipPath, LOCAL_TEX_FILENAME, ...referencedAssets];
-  await execFileAsync('zip', zipArgs, {
-    cwd: tempDir,
-    timeout: PDF_COMPILE_TIMEOUT_MS,
+
+  zip.file(LOCAL_TEX_FILENAME, tex);
+
+  for (const assetFilename of referencedAssets) {
+    const assetPath = path.join(tempDir, assetFilename);
+    try {
+      const assetBuffer = await readFile(assetPath);
+      zip.file(assetFilename, assetBuffer);
+    } catch (error) {
+      console.warn('[export-exam-pdf] Failed to include asset in LaTeX ZIP:', assetFilename, error);
+    }
+  }
+
+  return zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 9 },
   });
-  return readFile(zipPath);
 };
 
 const compileTexToPdfLocal = async ({
@@ -2305,7 +2316,7 @@ export async function POST(request: Request) {
           questions: enrichedQuestions,
         });
         const filename = `${baseFilename}-latex-assets.zip`;
-        return new Response(zipBuffer, {
+        return new Response(new Uint8Array(zipBuffer), {
           status: 200,
           headers: {
             'Content-Type': 'application/zip',

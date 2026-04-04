@@ -311,8 +311,8 @@ export default function CustomExamView({
   examTitle: string;
   examMeta?: string | null;
   questions: CustomExamQuestion[];
-  exportingPdf: 'exam' | 'solutions' | 'solutions-only' | 'latex-zip' | null;
-  onExportPdf: (mode: 'questions' | 'questions_with_solutions' | 'solutions_only' | 'raw_latex_zip') => Promise<void>;
+  exportingPdf: 'exam' | 'solutions' | 'solutions-only' | 'latex-tex' | 'latex-zip' | null;
+  onExportPdf: (mode: 'questions' | 'questions_with_solutions' | 'solutions_only' | 'raw_latex_tex' | 'raw_latex_zip') => Promise<void>;
   onBack: () => void;
 }) {
   const [showSolutions, setShowSolutions] = React.useState(false);
@@ -432,6 +432,15 @@ export default function CustomExamView({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => onExportPdf('raw_latex_tex')}
+            disabled={exportingPdf !== null || !displayQuestions.length}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+          >
+            <Download className="h-4 w-4" />
+            {exportingPdf === 'latex-tex' ? 'Exporting…' : 'Raw LaTeX (.tex)'}
+          </button>
           <button
             type="button"
             onClick={() => onExportPdf('questions')}
