@@ -668,7 +668,15 @@ export default function SavedView({
                                 }}
                               >
                                 <button
-                                  onClick={() => { setSelectedAttempt(attempt); setSavedExamReviewMode(false); setSavedQuestionsListExpanded(false); }}
+                                  onClick={() => {
+                                    if (isExam) {
+                                      openSavedExamAsPaper(attempt);
+                                      return;
+                                    }
+                                    setSelectedAttempt(attempt);
+                                    setSavedExamReviewMode(false);
+                                    setSavedQuestionsListExpanded(false);
+                                  }}
                                   className="w-full text-left cursor-pointer p-5"
                                 >
                                   {/* Card header */}
@@ -747,7 +755,7 @@ export default function SavedView({
                                 <div className="px-5 pb-4">
                                   <button
                                     onClick={(e) => { e.stopPropagation(); removeSavedAttempt(attempt.id); }}
-                                    className="text-xs font-semibold cursor-pointer px-3 py-1.5 rounded-lg transition-colors"
+                                  View in Exam Viewer
                                     style={{ color: 'var(--clr-surface-a50)' }}
                                   >
                                     Unsave

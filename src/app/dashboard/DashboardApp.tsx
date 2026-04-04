@@ -4562,9 +4562,8 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     });
     setPaperQuestions(typedQuestions);
     setPaperIndex(0);
-    setViewMode('paper');
-    const initialGroup = getDisplayGroupAt(typedQuestions, 0);
-    resetForQuestion(mergeGroupForDisplay(initialGroup.group));
+    setViewMode('exam');
+    router.push('/dashboard/exam');
   };
 
   const shuffleQuestions = (items: Question[]) => {
@@ -5165,7 +5164,15 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
             {viewMode === 'saved' && savedAttempts.length > 0 && sidebarContentExpanded && (
               <div className="space-y-0 px-2 pb-2">
                 {savedAttempts.map((attempt) => (
-                  <button key={attempt.id} onClick={() => { setSelectedAttempt(attempt); setSidebarHovered(false); }} className={`w-full text-left p-3 rounded-lg transition-colors text-sm cursor-pointer ${selectedAttempt?.id === attempt.id ? 'bg-neutral-100 text-neutral-900 font-medium' : 'text-neutral-600 hover:bg-neutral-50'}`}>
+                  <button key={attempt.id} onClick={() => {
+                    if (attempt.type === 'exam') {
+                      openSavedExamAsPaper(attempt);
+                      setSelectedAttempt(null);
+                    } else {
+                      setSelectedAttempt(attempt);
+                    }
+                    setSidebarHovered(false);
+                  }} className={`w-full text-left p-3 rounded-lg transition-colors text-sm cursor-pointer ${selectedAttempt?.id === attempt.id ? 'bg-neutral-100 text-neutral-900 font-medium' : 'text-neutral-600 hover:bg-neutral-50'}`}>
                     <div className="font-medium truncate">{attempt.subject}</div>
                     <div className="text-xs text-neutral-400 truncate">{attempt.topic}</div>
                     <div className="text-xs mt-1 text-neutral-400">{attempt.marks}m • {new Date(attempt.savedAt).toLocaleDateString()}</div>
