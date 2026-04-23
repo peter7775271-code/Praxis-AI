@@ -119,7 +119,7 @@ const collapseDuplicateDisplayMathDelimiters = (value: string) =>
     // Collapse repeated display-close delimiters like "\\]\\n\\]".
     .replace(/(?:\s*\\\]){2,}/g, '\n\\]');
 
-  const OVER_ESCAPED_COMMAND_PREFIX = '(?:frac|dfrac|sqrt|pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega|Delta|Sigma|Omega|leq|geq|neq|Rightarrow|leftrightarrow|to|times|div|pm|mp|sin|cos|tan|sec|cosec|cot|log|ln|exp|lim|vec|overrightarrow|overleftarrow|left|right|begin|end|text|operatorname|ensuremath)';
+  const OVER_ESCAPED_COMMAND_PREFIX = '(?:frac|dfrac|sqrt|pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega|Delta|Sigma|Omega|leq|geq|neq|Rightarrow|leftrightarrow|to|times|div|pm|mp|sin|cos|tan|sec|cosec|cot|log|ln|exp|lim|vec|overrightarrow|overleftarrow|left|right|begin|end|text|operatorname|ensuremath|dots|ldots|cdots)';
 
   const collapseOverEscapedDelimiters = (value: string) =>
     String(value || '').replace(/\\{2,}([\[\]\(\)])/g, (match, delimiter, offset, source) => {
@@ -183,6 +183,7 @@ const normalizeEscapedLatexArtifacts = (value: string) =>
         'left', 'right', 'frac', 'dfrac', 'sqrt', 'begin', 'end',
         'text', 'textbf', 'textit', 'mathrm', 'mathit', 'mathbf', 'mathbb', 'mathcal',
         'operatorname', 'ensuremath',
+        'cdots', 'ldots', 'dots',
         'cosec', 'arcsin', 'arccos', 'arctan',
         'overrightarrow', 'overleftarrow', 'overline', 'underline',
         'overbrace', 'underbrace', 'widehat', 'widetilde',
@@ -769,6 +770,11 @@ const normalizePlainBody = (value: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const normalizeLatexBodyConservative = (value: string) =>
+  decodeEscapedNewlineTokens(stripInvalidControlChars(value))
+    .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
+    .trim();
+
 const collapseInternalNewlines = (value: string) => {
   // Replace internal newlines and extra whitespace with single spaces.
   // This prevents embedded newlines from breaking LaTeX commands like \right.
@@ -952,18 +958,18 @@ const isInsideMathAt = (value: string, offset: number) => {
         inBracketMath = false;
       } else if (next === 'b' && value.slice(index + 2, index + 8) === 'egin{') {
         // Check for \begin{ environments
-        const endBrace = value.indexOf('}', index + 8);
+        const endBrace = value.indexOf('}', index + 7);
         if (endBrace > 0) {
-          const envName = value.slice(index + 8, endBrace).trim();
+          const envName = value.slice(index + 7, endBrace).trim();
           if (displayMathEnvs.has(envName)) {
             displayMathDepth += 1;
           }
         }
       } else if (next === 'e' && value.slice(index + 2, index + 6) === 'nd{') {
         // Check for \end{ environments
-        const endBrace = value.indexOf('}', index + 6);
+        const endBrace = value.indexOf('}', index + 5);
         if (endBrace > 0) {
-          const envName = value.slice(index + 6, endBrace).trim();
+          const envName = value.slice(index + 5, endBrace).trim();
           if (displayMathEnvs.has(envName)) {
             displayMathDepth = Math.max(0, displayMathDepth - 1);
           }
@@ -1766,12 +1772,15 @@ const buildExamLatex = ({
   compileSafeMode?: boolean;
   plainTextMode?: boolean;
 }) => {
-  const normalizeBody = plainTextMode ? normalizePlainBody : normalizeLatexBody;
   const renderBody = (value: string) => {
-    const normalized = normalizeBody(String(value || ''));
+    const sourceValue = String(value || '');
     if (plainTextMode) {
-      return escapeLatexText(normalized);
+      return escapeLatexText(normalizePlainBody(sourceValue));
     }
+    // Keep the standard path close to source LaTeX; reserve aggressive rewrites for compile-safe fallback.
+    const normalized = compileSafeMode
+      ? normalizeLatexBody(sourceValue)
+      : normalizeLatexBodyConservative(sourceValue);
     const displaySafeNormalized = unwrapParenMathInsideInlineDollar(
       unwrapDisplayMathAroundBlockLevelEnv(
         unwrapInlineMathInsideDisplayMath(normalized)
