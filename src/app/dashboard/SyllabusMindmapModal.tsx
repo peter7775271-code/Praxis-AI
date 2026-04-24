@@ -17,6 +17,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import RenderLatexText from '@/components/RenderLatexText';
+import { SUBJECTS_BY_YEAR } from './syllabus-config';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,15 +55,6 @@ type Props = {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const YEARS = ['Year 7', 'Year 8', 'Year 9', 'Year 10', 'Year 11', 'Year 12'] as const;
-
-const SUBJECTS_BY_YEAR: Record<string, string[]> = {
-  'Year 7': ['Mathematics'],
-  'Year 8': ['Mathematics'],
-  'Year 9': ['Mathematics'],
-  'Year 10': ['Mathematics'],
-  'Year 11': ['Mathematics Advanced', 'Mathematics Extension 1'],
-  'Year 12': ['Mathematics Advanced', 'Mathematics Extension 1', 'Mathematics Extension 2'],
-};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

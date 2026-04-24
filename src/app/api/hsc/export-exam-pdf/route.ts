@@ -2041,6 +2041,7 @@ const buildExamLatex = ({
 \\usepackage{lmodern}
 \\usepackage{microtype}
 \\usepackage{amsmath,amssymb,mathtools}
+\\usepackage{chemfig}
 \\usepackage[final]{graphicx}
 \\usepackage{enumitem}
 \\usepackage{multirow}

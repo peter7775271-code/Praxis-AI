@@ -11,6 +11,7 @@ import {
   TrendingUp,
   Search,
 } from 'lucide-react';
+import { SUBJECTS_BY_YEAR as SUBJECTS } from './syllabus-config';
 
 type DotPoint = { id: string; text: string };
 type TaxonomyGrouped = Record<string, Record<string, DotPoint[]>>;
@@ -36,15 +37,6 @@ type Props = {
 };
 
 const YEARS = ['Year 7', 'Year 8', 'Year 9', 'Year 10', 'Year 11', 'Year 12'] as const;
-
-const SUBJECTS: Record<(typeof YEARS)[number], string[]> = {
-  'Year 7': ['Mathematics'],
-  'Year 8': ['Mathematics'],
-  'Year 9': ['Mathematics'],
-  'Year 10': ['Mathematics'],
-  'Year 11': ['Mathematics Advanced', 'Mathematics Extension 1'],
-  'Year 12': ['Mathematics Advanced', 'Mathematics Extension 1', 'Mathematics Extension 2'],
-};
 
 const coerceDotPointText = (value: unknown): string => {
   if (typeof value === 'string') return value.trim();
@@ -113,7 +105,7 @@ const slugify = (value: string) =>
 
 export default function SyllabusViewer({ isDevMode: _isDevMode = false }: Props) {
   const [selectedYear, setSelectedYear] = useState<(typeof YEARS)[number]>('Year 12');
-  const [selectedSubject, setSelectedSubject] = useState<string>('Mathematics Advanced');
+  const [selectedSubject, setSelectedSubject] = useState<string>(SUBJECTS['Year 12'][0] || 'Mathematics');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTopic, setActiveTopic] = useState<string | null>(null);
   const [expandedSubtopics, setExpandedSubtopics] = useState<string[]>([]);

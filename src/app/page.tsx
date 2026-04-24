@@ -300,10 +300,10 @@ export default function Home() {
                   <BookOpen size={32} className="text-neutral-900" />
                 </div>
                 <div className="space-y-4">
-                  {["Mathematics", "Physics", "Biology"].map((subject) => (
+                  {["Mathematics", "Chemistry", "Physics", "Biology"].map((subject) => (
                     <div key={subject} className="flex items-center justify-between p-3 bg-neutral-50 rounded-xl">
                       <span className="text-sm font-medium">{subject}</span>
-                      <span className="text-[10px] font-bold text-neutral-400">2,400+ Qs</span>
+                      <span className="text-[10px] font-bold text-neutral-400">1,000+ Qs</span>
                     </div>
                   ))}
                 </div>

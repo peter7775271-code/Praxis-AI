@@ -215,6 +215,7 @@ const LATEX_OUTPUT_RULES = [
   '## Cases/piecewise functions: Use \\begin{cases}...\\end{cases}. Format: expression & condition \\\\ on each row.',
   '## Cases + display delimiters (critical): When a cases block is followed by extra math text (for example \\text{for } t \\in (-\\infty,\\infty)), keep everything inside one display block and close display math exactly once at the end. Valid pattern: \\[ \\begin{cases} ... \\end{cases} \\quad \\text{for } t \\in (-\\infty,\\infty) \\]. Invalid pattern: \\begin{cases} ... \\end{cases} \\] ... \\in ... \\]. Also, inside cases, separate rows with \\\\ (never a single backslash).',
   '## Commands with backslashes: Greek letters (\\alpha \\beta \\gamma \\delta \\theta \\lambda \\mu \\sigma \\phi \\omega \\pi), Capital Greek (\\Delta \\Sigma \\Omega), Operators (\\sin \\cos \\tan \\sec \\cot \\ln \\log \\exp \\lim \\to \\Rightarrow \\approx \\times \\div). For cosecant: write \\operatorname{cosec}, never bare cosec.',
+  '## Chemical structures: For chemistry structure diagrams, you may use \\chemfig{...} syntax when appropriate.',
   '## Forbidden patterns: Never write \\dfrac, beginaligned, or endaligned. Never write \\left[ without \\right] (same for \\left\\{, \\left()). Never use bare % (write \\% for percent). Never use bare & outside alignment environments. Never use bare _ outside math mode (write \\_ in prose). Never use \\begin{figure}, \\begin{table}, \\includegraphics. Never write \\textbackslash{} inside math mode.',
   '## Tables: Use only \\begin{center}\\begin{tabular}{...}...\\end{tabular}\\end{center}. Never use \\begin{table}, \\caption, \\captionsetup, or floating environments.',
   '## Braces: Every { must have a matching }. Never leave \\frac, \\sqrt, \\text, \\mathbf, etc. without closing braces.',
@@ -317,6 +318,84 @@ const classifyIngestError = (message: string) => {
     hint: 'Open the ingest response payload and inspect details + stage to pinpoint the failure.',
     status: 500,
   };
+};
+
+const SUPPORTED_SUBJECTS_BY_GRADE: Record<string, readonly string[]> = {
+  'Year 7': ['Mathematics', 'Science'],
+  'Year 8': ['Mathematics', 'Science'],
+  'Year 9': ['Mathematics', 'Science'],
+  'Year 10': ['Mathematics', 'Science'],
+  'Year 11': ['Mathematics Standard', 'Mathematics Advanced', 'Mathematics Extension 1', 'Chemistry', 'Physics', 'Biology'],
+  'Year 12': ['Mathematics Standard', 'Mathematics Advanced', 'Mathematics Extension 1', 'Mathematics Extension 2', 'Chemistry', 'Physics', 'Biology'],
+};
+
+const SCIENCE_SUBJECTS = new Set(['science', 'chemistry', 'physics', 'biology']);
+
+const normalizeLooseToken = (value: unknown) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+const normalizeTextToken = (value: unknown) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
+const canonicalizeGrade = (value: unknown): string | null => {
+  const token = normalizeLooseToken(value);
+  if (!token) return null;
+
+  const byToken = Object.keys(SUPPORTED_SUBJECTS_BY_GRADE).find(
+    (candidate) => normalizeLooseToken(candidate) === token
+  );
+
+  return byToken || null;
+};
+
+const canonicalizeSubjectForGrade = (grade: string, subject: unknown): string | null => {
+  const allowedSubjects = SUPPORTED_SUBJECTS_BY_GRADE[grade] || [];
+  const subjectToken = normalizeTextToken(subject);
+  if (!subjectToken) return null;
+
+  return allowedSubjects.find((candidate) => normalizeTextToken(candidate) === subjectToken) || null;
+};
+
+const extractYearLevelFromGrade = (grade: string) => {
+  const match = String(grade || '').match(/(\d{1,2})/);
+  if (match?.[1]) return match[1];
+
+  const normalized = String(grade || '').replace(/^year\s*/i, '').trim();
+  return normalized || String(grade || '').trim();
+};
+
+const buildScienceTutorPrompt = (subject: string, grade: string) => {
+  const normalizedSubject = String(subject || '').trim().toLowerCase();
+  if (!SCIENCE_SUBJECTS.has(normalizedSubject)) {
+    return '';
+  }
+
+  const yearLevel = extractYearLevelFromGrade(grade);
+
+  return [
+    `You are an expert HSC ${subject} tutor helping a Year ${yearLevel} student in NSW, Australia.`,
+    'Answer the following exam question(s) clearly and concisely, following these rules:',
+    'Style:',
+    '- Write for a high school student - no university-level jargon',
+    '- Use dot points for multi-part answers, prose for explain/discuss questions',
+    '- Match the depth to the mark value (1 mark = 1 key idea)',
+    'Content:',
+    '- Follow the HSC syllabus (NESA 2019 onwards)',
+    '- Use correct scientific terminology as NESA expects it',
+    '- For calculations: show every step, include units, and state the answer clearly',
+    '- For chemical structure diagrams, you may use \\chemfig{...} in LaTeX when appropriate',
+    '- For "explain" questions: always state WHAT happens, then WHY',
+    '- For "assess/evaluate" questions: give both sides, then a justified conclusion',
+    'Format:',
+    '- Start with the most mark-worthy point first',
+    '- If the question has a command verb (describe, explain, evaluate), explicitly address it',
+  ].join(' ');
 };
 
 const truncateDebugText = (value: unknown, maxLength = 180) => {
@@ -1657,8 +1736,11 @@ const cleanQuestionBatchWithOpenAi = async (args: {
   batch: ParsedQuestionBatch;
   imageFiles: string[];
   reasoningEffort: ReasoningEffort;
+  subject?: string;
+  grade?: string;
 }) => {
-  const { openai, batch, imageFiles, reasoningEffort } = args;
+  const { openai, batch, imageFiles, reasoningEffort, subject, grade } = args;
+  const scienceTutorPrompt = buildScienceTutorPrompt(String(subject || ''), String(grade || ''));
   const sourceQuestionLookup = new Map<string, ParsedQuestion>();
   const remainingSourceQuestions = [...batch.questions];
   for (const question of batch.questions) {
@@ -1691,7 +1773,7 @@ const cleanQuestionBatchWithOpenAi = async (args: {
     },
   ];
 
-  const systemPrompt = `Solve OCR-extracted exam questions. Output JSON only with key "solutions" containing array of {questionNumber, label, questionText, sampleSolution, marks, questionType, mcqOptions, mcqCorrectAnswer, questionImageRefs, optionImageRefs}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_OUTPUT_RULES} Step-by-step working with clear final answer. In sampleSolution, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability. The questions in each batch are related, so use earlier subparts as context only when relevant. If a question lacks enough context, omit it completely instead of guessing. Do not merge unrelated questions.`;
+  const systemPrompt = `Solve OCR-extracted exam questions. Output JSON only with key "solutions" containing array of {questionNumber, label, questionText, sampleSolution, marks, questionType, mcqOptions, mcqCorrectAnswer, questionImageRefs, optionImageRefs}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} ${MCQ_RULES} ${LATEX_OUTPUT_RULES} Step-by-step working with clear final answer. In sampleSolution, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability. The questions in each batch are related, so use earlier subparts as context only when relevant. If a question lacks enough context, omit it completely instead of guessing. Do not merge unrelated questions.${scienceTutorPrompt ? ` ${scienceTutorPrompt}` : ''}`;
 
   const userPrompt = userContent
     .map((item) => (item.type === 'text' ? item.text : ''))
@@ -1883,8 +1965,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const grade = String(formData.get('grade') || '').trim();
-    const subject = String(formData.get('subject') || '').trim();
+    let grade = String(formData.get('grade') || '').trim();
+    let subject = String(formData.get('subject') || '').trim();
     const schoolName = String(formData.get('school') || formData.get('schoolName') || '').trim();
     const yearRaw = String(formData.get('year') || '').trim();
     const year = Number.parseInt(yearRaw, 10);
@@ -1896,6 +1978,37 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+    const canonicalGrade = canonicalizeGrade(grade);
+    if (!dryRun && !canonicalGrade) {
+      return NextResponse.json(
+        {
+          error: `Unsupported grade "${grade}" for pdf-ingest-v2`,
+          allowedGrades: Object.keys(SUPPORTED_SUBJECTS_BY_GRADE),
+        },
+        { status: 400 }
+      );
+    }
+    if (canonicalGrade) {
+      grade = canonicalGrade;
+    }
+
+    const canonicalSubject = canonicalizeSubjectForGrade(grade, subject);
+    if (!dryRun && !canonicalSubject) {
+      return NextResponse.json(
+        {
+          error: `Unsupported subject "${subject}" for ${grade}.`,
+          grade,
+          allowedSubjects: SUPPORTED_SUBJECTS_BY_GRADE[grade] || [],
+        },
+        { status: 400 }
+      );
+    }
+    if (canonicalSubject) {
+      subject = canonicalSubject;
+    }
+
+    const scienceTutorPrompt = buildScienceTutorPrompt(subject, grade);
 
     const maxQuestions = Math.max(1, Math.min(500, normalizePositiveInteger(formData.get('maxQuestions'), 200)));
     const overwrite = parseBoolean(formData.get('overwrite'), false);
@@ -2115,7 +2228,7 @@ export async function POST(request: Request) {
           messages: [
             {
               role: 'system',
-              content: `You are cleaning OCR LaTeX exam questions and producing solved outputs. Preserve math meaning. Return JSON only with key "solutions" containing an array of objects with questionNumber, label, questionType, formattedQuestionLatex, mcqOptions, optionImageRefs, questionImageRefs, mcqCorrectAnswer, solutionLatex. questionType must be exactly "written" or "multiple_choice". For multiple_choice, return all options in mcqOptions and keep formattedQuestionLatex as the stem only with no option lines. For written, return mcqOptions as [] and mcqCorrectAnswer as null. formattedQuestionLatex and solutionLatex must not contain escaped artifact tokens like literal \\n, \\r, \\t, \\\\n, or doubled command escapes. Emit clean LaTeX content as single-line field values (spaces only; no newline characters). In solutionLatex, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability. solutionLatex must be readable and compile-safe: valid delimiters, no repeated display-open delimiters, valid align* row breaks, and cases labels as \\text{...}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} The questions in this batch are related and must be solved together. If a subpart lacks enough context, omit it completely. If images are provided, do not describe image contents in output text. Use images only to solve. Do not include markdown code fences.`,
+              content: `You are cleaning OCR LaTeX exam questions and producing solved outputs. Preserve math meaning. Return JSON only with key "solutions" containing an array of objects with questionNumber, label, questionType, formattedQuestionLatex, mcqOptions, optionImageRefs, questionImageRefs, mcqCorrectAnswer, solutionLatex. questionType must be exactly "written" or "multiple_choice". For multiple_choice, return all options in mcqOptions and keep formattedQuestionLatex as the stem only with no option lines. For written, return mcqOptions as [] and mcqCorrectAnswer as null. formattedQuestionLatex and solutionLatex must not contain escaped artifact tokens like literal \\n, \\r, \\t, \\\\n, or doubled command escapes. Emit clean LaTeX content as single-line field values (spaces only; no newline characters). In solutionLatex, prefer display math \\[ ... \\] for worked equations, derivations, and final displayed answers whenever that improves readability. solutionLatex must be readable and compile-safe: valid delimiters, no repeated display-open delimiters, valid align* row breaks, and cases labels as \\text{...}. ${SHARED_STEM_RULE} ${NO_REPEAT_SUBPART_RULE} The questions in this batch are related and must be solved together. If a subpart lacks enough context, omit it completely. If images are provided, do not describe image contents in output text. Use images only to solve. ${scienceTutorPrompt ? `${scienceTutorPrompt} ` : ''}${LATEX_OUTPUT_RULES} Do not include markdown code fences.`,
             },
             {
               role: 'user',
@@ -2610,6 +2723,8 @@ export async function POST(request: Request) {
           batch,
           imageFiles,
           reasoningEffort,
+          subject,
+          grade,
         });
         groupedPromptDebug.push(batchCleanResult.debug);
         const solvedQuestions = batchCleanResult.solvedQuestions;
