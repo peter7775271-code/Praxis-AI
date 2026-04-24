@@ -17,7 +17,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import RenderLatexText from '@/components/RenderLatexText';
-import { SUBJECTS_BY_YEAR } from './syllabus-config';
+import { SUBJECTS_BY_YEAR, type YearLevel } from './syllabus-config';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,7 +54,11 @@ type Props = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const YEARS = ['Year 7', 'Year 8', 'Year 9', 'Year 10', 'Year 11', 'Year 12'] as const;
+const YEARS: readonly YearLevel[] = ['Year 7', 'Year 8', 'Year 9', 'Year 10', 'Year 11', 'Year 12'];
+
+const isYearLevel = (value: string): value is YearLevel => value in SUBJECTS_BY_YEAR;
+
+const coerceYearLevel = (value: string): YearLevel => (isYearLevel(value) ? value : YEARS[0]);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -132,20 +136,20 @@ export default function SyllabusMindmapModal({
   onConfirm,
 }: Props) {
   // ── Selector state ──────────────────────────────────────────────────────────
-  const [grade, setGrade] = useState(initialGrade);
+  const [grade, setGrade] = useState<YearLevel>(coerceYearLevel(initialGrade));
   const [subject, setSubject] = useState(initialSubject);
 
   // Sync grade/subject when props change and modal is opened
   useEffect(() => {
     if (open) {
-      setGrade(initialGrade);
+      setGrade(coerceYearLevel(initialGrade));
       setSubject(initialSubject);
     }
   }, [open, initialGrade, initialSubject]);
 
   // Ensure subject is valid for grade
   useEffect(() => {
-    const validSubjects = SUBJECTS_BY_YEAR[grade] || [];
+    const validSubjects = SUBJECTS_BY_YEAR[grade];
     if (!validSubjects.includes(subject)) setSubject(validSubjects[0] || '');
   }, [grade, subject]);
 
@@ -443,7 +447,7 @@ export default function SyllabusMindmapModal({
           <div className="flex gap-2 items-center">
             <select
               value={grade}
-              onChange={(e) => setGrade(e.target.value)}
+              onChange={(e) => setGrade(coerceYearLevel(e.target.value))}
               className="h-9 rounded-xl border border-neutral-200 bg-neutral-50 px-3 text-sm font-medium text-neutral-800 focus:outline-none focus:ring-1 focus:ring-[#b5a45d]"
             >
               {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
@@ -453,7 +457,7 @@ export default function SyllabusMindmapModal({
               onChange={(e) => setSubject(e.target.value)}
               className="h-9 rounded-xl border border-neutral-200 bg-neutral-50 px-3 text-sm font-medium text-neutral-800 focus:outline-none focus:ring-1 focus:ring-[#b5a45d]"
             >
-              {(SUBJECTS_BY_YEAR[grade] || []).map((s) => <option key={s} value={s}>{s}</option>)}
+              {SUBJECTS_BY_YEAR[grade].map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div className="flex-1 relative">
