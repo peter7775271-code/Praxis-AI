@@ -2593,18 +2593,36 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     paperSubject,
     paperGrade,
     outputFormat = 'pdf',
+    download = true,
     autoFixExport = false,
+    pdfOptions,
   }: {
     includeSolutions: boolean;
     includeQuestionContent?: boolean;
-    questions: any[];
+    questions: unknown[];
     title: string;
     subtitle: string;
     downloadName: string;
     paperSubject?: string;
     paperGrade?: string;
     outputFormat?: 'pdf' | 'tex' | 'tex-zip';
+    download?: boolean;
     autoFixExport?: boolean;
+    pdfOptions?: {
+      hideDefaultHeader?: boolean;
+      includeCoverPage?: boolean;
+      coverPageTitle?: string;
+      coverPageSubtitle?: string;
+      coverPageFooter?: string;
+      fontFamily?: 'lmodern' | 'sans' | 'palatino';
+      fontSizePt?: number;
+      dottedAnswerLinesEnabled?: boolean;
+      dottedAnswerLineCount?: number;
+      watermarkEnabled?: boolean;
+      watermarkImageData?: string;
+      watermarkOpacity?: number;
+      watermarkImageScale?: number;
+    };
   }) => {
     if (!questions.length) {
       throw new Error('No questions available to export.');
@@ -2626,12 +2644,13 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         autoFixExport,
         paperSubject,
         paperGrade,
+        pdfOptions,
         questions,
       }),
     });
 
     if (!response.ok) {
-      let err: any = {};
+      let err: { details?: string; error?: string } = {};
       try {
         err = await response.json();
       } catch {
@@ -2649,14 +2668,24 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     const defaultExt = contentType.includes('application/zip')
       ? '.zip'
       : (contentType.includes('application/x-tex') ? '.tex' : '.pdf');
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = serverFilename || `${downloadName.replace(/[^a-z0-9\-_.]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'custom-exam'}${includeSolutions ? '-with-solutions' : ''}${defaultExt}`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    const resolvedFilename = serverFilename || `${downloadName.replace(/[^a-z0-9\-_.]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'custom-exam'}${includeSolutions ? '-with-solutions' : ''}${defaultExt}`;
+
+    if (download) {
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = resolvedFilename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    return {
+      blob,
+      filename: resolvedFilename,
+      contentType,
+    };
   };
 
   const exportPaperPdf = async (includeSolutions: boolean, autoFixExport = false) => {
@@ -2732,8 +2761,34 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     }
   };
 
-  const exportCustomExamPdf = async (mode: 'questions' | 'questions_with_solutions' | 'solutions_only' | 'raw_latex_tex' | 'raw_latex_zip') => {
-    if (!paperQuestions.length) {
+  const exportCustomExamPdf = async (
+    mode: 'questions' | 'questions_with_solutions' | 'solutions_only' | 'raw_latex_tex' | 'raw_latex_zip',
+    options?: {
+      questionsOverride?: Array<{ topic?: string | null; [key: string]: unknown }>;
+      preview?: boolean;
+      titleOverride?: string;
+      pdfOptions?: {
+        hideDefaultHeader?: boolean;
+        includeCoverPage?: boolean;
+        coverPageTitle?: string;
+        coverPageSubtitle?: string;
+        coverPageFooter?: string;
+        fontFamily?: 'lmodern' | 'sans' | 'palatino';
+        fontSizePt?: number;
+        dottedAnswerLinesEnabled?: boolean;
+        dottedAnswerLineCount?: number;
+        watermarkEnabled?: boolean;
+        watermarkImageData?: string;
+        watermarkOpacity?: number;
+        watermarkImageScale?: number;
+      };
+    },
+  ) => {
+    const exportQuestions: Array<{ topic?: string | null; [key: string]: unknown }> = Array.isArray(options?.questionsOverride)
+      ? options.questionsOverride.filter(Boolean)
+      : paperQuestions;
+
+    if (!exportQuestions.length) {
       alert('No custom exam questions are available to export.');
       return;
     }
@@ -2752,9 +2807,11 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
     try {
       const subject = activePaper?.subject || 'Custom Exam';
+      const customDocumentTitle = String(options?.titleOverride || activePaper?.customName || '').trim();
       const grade = activePaper?.grade || '';
-      const title = `${subject} ${mode === 'solutions_only' ? 'Solutions' : (includeSolutions ? 'Solutions' : 'Paper')}`;
-      const subtitle = [grade, `${paperQuestions.length} question${paperQuestions.length === 1 ? '' : 's'}`].filter(Boolean).join(' • ');
+      const titleBase = customDocumentTitle || subject;
+      const title = `${titleBase} ${mode === 'solutions_only' ? 'Solutions' : (includeSolutions ? 'Solutions' : 'Paper')}`;
+      const subtitle = [grade, `${exportQuestions.length} question${exportQuestions.length === 1 ? '' : 's'}`].filter(Boolean).join(' • ');
       const normalizedSubject = String(subject || '').toLowerCase();
       const subjectCode = normalizedSubject.includes('extension 2') || normalizedSubject.includes('ext 2')
         ? 'ME2'
@@ -2762,21 +2819,23 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
           ? 'ME1'
           : (normalizedSubject.includes('standard') ? 'MS' : 'MA'));
       const gradeToken = String(grade || '').includes('11') ? 'Y11' : 'Y12';
-      const topicLabel = String(activePaper?.topic || paperQuestions[0]?.topic || 'Custom Topic').trim() || 'Custom Topic';
+      const topicLabel = String(activePaper?.topic || exportQuestions[0]?.topic || 'Custom Topic').trim() || 'Custom Topic';
       const documentLabel = includeQuestionContent
         ? (includeSolutions ? 'Questions + Solutions' : 'Questions')
         : 'Solutions';
       const downloadName = `${gradeToken} ${subjectCode} ${topicLabel} [${documentLabel}]`;
 
-      await exportExamQuestionsPdf({
+      return await exportExamQuestionsPdf({
         includeSolutions,
         includeQuestionContent,
         outputFormat,
+        download: !options?.preview,
         autoFixExport: false,
-        questions: paperQuestions,
+        questions: exportQuestions,
         title,
         subtitle,
         downloadName,
+        pdfOptions: options?.pdfOptions,
         paperSubject: subject,
         paperGrade: grade,
       });
@@ -5302,7 +5361,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
             </div>
           </header>
           <div ref={mainContentScrollRef} className={`flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar z-10 relative ${viewMode === 'paper' && showPaperQuestionNavigator ? 'lg:pr-[22rem]' : ''}`}>
-            <div className={`${viewMode === 'paper' ? 'max-w-[68rem] mx-auto w-full space-y-8 lg:translate-x-2' : viewMode === 'exam' ? 'max-w-6xl mx-auto w-full space-y-8' : 'max-w-5xl mx-auto space-y-8'}`}>
+            <div className={`${viewMode === 'paper' ? 'max-w-[68rem] mx-auto w-full space-y-8 lg:translate-x-2' : viewMode === 'exam' ? 'w-full space-y-8' : 'max-w-5xl mx-auto space-y-8'}`}>
               {viewMode === 'dashboard' && (
                 <DashboardView
                   setViewMode={setViewMode}

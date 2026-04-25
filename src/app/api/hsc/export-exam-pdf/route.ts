@@ -72,17 +72,39 @@ type ExportQuestion = {
   mcq_option_c?: string | null;
   mcq_option_d?: string | null;
   mcq_option_a_image?: string | null;
+  mcq_option_a_image_size?: 'small' | 'medium' | 'large' | null;
   mcq_option_b_image?: string | null;
+  mcq_option_b_image_size?: 'small' | 'medium' | 'large' | null;
   mcq_option_c_image?: string | null;
+  mcq_option_c_image_size?: 'small' | 'medium' | 'large' | null;
   mcq_option_d_image?: string | null;
+  mcq_option_d_image_size?: 'small' | 'medium' | 'large' | null;
   mcq_correct_answer?: 'A' | 'B' | 'C' | 'D' | null;
   mcq_explanation?: string | null;
+  dotted_answer_line_count?: number | null;
+  graph_image_part_label?: string | null;
   graph_image_file?: string | null;
   sample_answer_image_file?: string | null;
   mcq_option_a_image_file?: string | null;
   mcq_option_b_image_file?: string | null;
   mcq_option_c_image_file?: string | null;
   mcq_option_d_image_file?: string | null;
+};
+
+type ExportPdfOptions = {
+  hideDefaultHeader?: boolean;
+  includeCoverPage?: boolean;
+  coverPageTitle?: string;
+  coverPageSubtitle?: string;
+  coverPageFooter?: string;
+  fontFamily?: 'lmodern' | 'sans' | 'palatino';
+  fontSizePt?: number;
+  dottedAnswerLinesEnabled?: boolean;
+  dottedAnswerLineCount?: number;
+  watermarkEnabled?: boolean;
+  watermarkImageData?: string;
+  watermarkOpacity?: number;
+  watermarkImageScale?: number;
 };
 
 const escapeLatexText = (value: string) =>
@@ -513,6 +535,17 @@ const wrapParenthesizedMathLikeSegments = (value: string) =>
     return `${prefix}\\(${candidate}\\)`;
   });
 
+const wrapParenthesizedDegreeUnits = (value: string) =>
+  String(value || '').replace(
+    /\(\s*\^(?:\{\\circ\}|\\circ)\s*(?:\\mathrm\{([^{}]+)\}|([A-Za-z]+))\s*\)/g,
+    (match, unitWithBraces, plainUnit, offset, source) => {
+      if (isInsideMathAt(source, offset)) return match;
+      const unit = String(unitWithBraces || plainUnit || '').trim();
+      if (!unit) return match;
+      return `\\ensuremath{({}^{\\circ}\\mathrm{${unit}})}`;
+    }
+  );
+
 const sanitizeMisplacedTableRules = (value: string) => {
   const tableLikeEnvironments = new Set(['tabular', 'tabular*', 'array', 'tabularx', 'longtable']);
   let tableDepth = 0;
@@ -657,11 +690,62 @@ const unwrapTextCommandOutsideMath = (value: string) =>
     return String(content || '');
   });
 
+const formatPartDividerLabel = (label: string) => {
+  const trimmed = String(label || '').trim();
+  if (!trimmed) return '(Part)';
+  // Keep labels that already contain explicit bracketed parts, e.g. "(i)" or "(i)(ii)".
+  if (/\([^)]+\)/.test(trimmed)) return trimmed;
+  return `(${trimmed})`;
+};
+
+const PART_DIVIDER_DETECT_REGEX = /\[\[PART_DIVIDER:[^\]]+\]\]/;
+const PART_DIVIDER_CAPTURE_REGEX = /\[\[PART_DIVIDER:([^\]]+)\]\]/g;
+
+const splitQuestionTextByPartDividers = (value: string) => {
+  const source = String(value || '');
+  const parts: Array<{ label: string; content: string }> = [];
+  let intro = '';
+  let activeLabel: string | null = null;
+  let lastIndex = 0;
+
+  for (const match of source.matchAll(PART_DIVIDER_CAPTURE_REGEX)) {
+    const matchStart = match.index ?? 0;
+    const fullToken = String(match[0] || '');
+    const label = String(match[1] || '').trim();
+    if (activeLabel === null) {
+      intro = source.slice(0, matchStart);
+    } else {
+      parts.push({
+        label: activeLabel,
+        content: source.slice(lastIndex, matchStart),
+      });
+    }
+    activeLabel = label || 'Part';
+    lastIndex = matchStart + fullToken.length;
+  }
+
+  if (activeLabel !== null) {
+    parts.push({
+      label: activeLabel,
+      content: source.slice(lastIndex),
+    });
+  }
+
+  return { intro, parts };
+};
+
+const normalizePartLabelForMatch = (label: string | null | undefined) =>
+  String(label || '')
+    .trim()
+    .replace(/\s+/g, '')
+    .toLowerCase();
+
 const normalizeLatexBody = (value: string) =>
   unwrapTextCommandOutsideMath(repairMalformedEnsureMathBoxed(
     wrapBareMathCommandsOutsideMath(
       wrapBareBoxedOutsideMath(
     escapeAmpersandsOutsideAlignment(
+      wrapParenthesizedDegreeUnits(
       wrapParenthesizedMathLikeSegments(
         wrapBareCasesBlocksOutsideMath(
         normalizeCasesTextLabels(
@@ -680,7 +764,7 @@ const normalizeLatexBody = (value: string) =>
           )
           )
         )
-        .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
+        .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]\s*/g, (_match, label) => `\n\n\\noindent\\textbf{${formatPartDividerLabel(label)}} `)
         .replace(/\\begin\{table\}[\s\S]*?\\end\{table\}/gi, (match) => {
         // Extract the tabular environment from within the table float
         const tabularMatch = match.match(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/i);
@@ -750,11 +834,12 @@ const normalizeLatexBody = (value: string) =>
     )
       )
     )
+      )
   ));
 
 const normalizePlainBody = (value: string) =>
   normalizeEscapedLatexArtifactsSafe(stripInvalidControlChars(value))
-    .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n(${label}) `)
+    .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]\s*/g, (_match, label) => `\n\n${formatPartDividerLabel(label)} `)
     .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/gi, '')
     .replace(/\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{[^}]+\}/gi, '')
     .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
@@ -771,8 +856,8 @@ const normalizePlainBody = (value: string) =>
     .trim();
 
 const normalizeLatexBodyConservative = (value: string) =>
-  decodeEscapedNewlineTokens(stripInvalidControlChars(value))
-    .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]/g, (_match, label) => `\n\n\\noindent\\textbf{(${label})} `)
+  wrapParenthesizedDegreeUnits(decodeEscapedNewlineTokens(stripInvalidControlChars(value)))
+    .replace(/\[\[PART_DIVIDER:([^\]]+)\]\]\s*/g, (_match, label) => `\n\n\\noindent\\textbf{${formatPartDividerLabel(label)}} `)
     .trim();
 
 const collapseInternalNewlines = (value: string) => {
@@ -1761,6 +1846,8 @@ const buildExamLatex = ({
   questions,
   compileSafeMode = false,
   plainTextMode = false,
+  pdfOptions,
+  watermarkImageFile,
 }: {
   title: string;
   subtitle: string;
@@ -1771,6 +1858,8 @@ const buildExamLatex = ({
   questions: ExportQuestion[];
   compileSafeMode?: boolean;
   plainTextMode?: boolean;
+  pdfOptions?: ExportPdfOptions;
+  watermarkImageFile?: string | null;
 }) => {
   const renderBody = (value: string) => {
     const sourceValue = String(value || '');
@@ -1805,6 +1894,26 @@ const buildExamLatex = ({
   let nextQuestionNumber = 1;
   let lastRelatedKey: string | null = null;
   let lastMappedMain: number | null = null;
+  const dottedAnswerLinesEnabled = !includeSolutions
+    && includeQuestionContent
+    && Boolean(pdfOptions?.dottedAnswerLinesEnabled);
+  const dottedAnswerLineCount = Math.min(12, Math.max(1, Number(pdfOptions?.dottedAnswerLineCount ?? 3)));
+  const normalizeDottedLineCountOverride = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    return Math.min(12, Math.max(1, Math.round(numeric)));
+  };
+
+  const appendDottedAnswerLines = (lines: string[], lineCountOverride?: number | null) => {
+    if (!dottedAnswerLinesEnabled) return;
+    const resolvedLineCount = normalizeDottedLineCountOverride(lineCountOverride) ?? dottedAnswerLineCount;
+    lines.push('\\vspace{0.35em}');
+    for (let lineIndex = 0; lineIndex < resolvedLineCount; lineIndex += 1) {
+      lines.push('\\noindent\\makebox[\\textwidth]{\\dotfill}\\\\[0.9em]');
+    }
+    lines.push('');
+  };
   const parsedDetails = questions.map((question) => {
     const details = parseQuestionNumberForDisplay(question.question_number);
     const baseKey = details.baseKey;
@@ -1856,14 +1965,59 @@ const buildExamLatex = ({
     inlinePrefix = '',
     skipQuestionText = false
   ) => {
+    let dottedLinesHandledBySubparts = false;
+    let questionImageRenderedInline = false;
+    const questionSpecificDottedLineCount = normalizeDottedLineCountOverride(question.dotted_answer_line_count);
     const questionType = question.question_type || 'written';
     const shouldRenderQuestionContent = !skipQuestionText;
     if (shouldRenderQuestionContent) {
-      const questionText = renderBody(String(question.question_text || ''));
-      lines.push(`${inlinePrefix}${questionText || 'No question text provided.'}`);
-      lines.push('');
+      const rawQuestionText = String(question.question_text || '');
+      if (dottedAnswerLinesEnabled && PART_DIVIDER_DETECT_REGEX.test(rawQuestionText)) {
+        const { intro, parts } = splitQuestionTextByPartDividers(rawQuestionText);
+        let renderedAnyQuestionText = false;
+
+        if (String(intro || '').trim()) {
+          const introText = renderBody(intro);
+          lines.push(`${inlinePrefix}${introText || 'No question text provided.'}`);
+          lines.push('');
+          renderedAnyQuestionText = true;
+        }
+
+        for (const [partIndex, part] of parts.entries()) {
+          const partSource = `[[PART_DIVIDER:${part.label}]] ${part.content || ''}`;
+          const partText = renderBody(partSource);
+          const partPrefix = (!renderedAnyQuestionText && partIndex === 0) ? inlinePrefix : '';
+          lines.push(`${partPrefix}${partText || `\\noindent\\textbf{${formatPartDividerLabel(part.label)}}`}`);
+          lines.push('');
+          const targetImagePartLabel = normalizePartLabelForMatch(question.graph_image_part_label);
+          const currentPartLabel = normalizePartLabelForMatch(formatPartDividerLabel(part.label));
+          const shouldRenderImageForThisPart = question.graph_image_file && (
+            (targetImagePartLabel && currentPartLabel === targetImagePartLabel)
+            || (!targetImagePartLabel && partIndex === 0)
+          );
+          if (shouldRenderImageForThisPart) {
+            lines.push('\\begin{center}');
+            lines.push(`\\includegraphics[draft=false,width=${imageWidthBySize(question.graph_image_size)}]{${question.graph_image_file}}`);
+            lines.push('\\end{center}');
+            lines.push('');
+            questionImageRenderedInline = true;
+          }
+          appendDottedAnswerLines(lines, questionSpecificDottedLineCount);
+          renderedAnyQuestionText = true;
+        }
+
+        if (!renderedAnyQuestionText) {
+          lines.push(`${inlinePrefix}No question text provided.`);
+          lines.push('');
+        }
+        dottedLinesHandledBySubparts = parts.length > 0;
+      } else {
+        const questionText = renderBody(rawQuestionText);
+        lines.push(`${inlinePrefix}${questionText || 'No question text provided.'}`);
+        lines.push('');
+      }
     }
-    if (shouldRenderQuestionContent && question.graph_image_file) {
+    if (shouldRenderQuestionContent && question.graph_image_file && !questionImageRenderedInline) {
       lines.push('\\begin{center}');
       lines.push(`\\includegraphics[draft=false,width=${imageWidthBySize(question.graph_image_size)}]{${question.graph_image_file}}`);
       lines.push('\\end{center}');
@@ -1872,26 +2026,30 @@ const buildExamLatex = ({
 
     if (questionType === 'multiple_choice') {
       if (shouldRenderQuestionContent) {
-        const options: Array<{ label: 'A' | 'B' | 'C' | 'D'; value: string; imageFile?: string | null }> = [
+        const options: Array<{ label: 'A' | 'B' | 'C' | 'D'; value: string; imageFile?: string | null; imageSize?: string | null }> = [
           {
             label: 'A',
             value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_a || '').trim())),
             imageFile: question.mcq_option_a_image_file,
+            imageSize: question.mcq_option_a_image_size,
           },
           {
             label: 'B',
             value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_b || '').trim())),
             imageFile: question.mcq_option_b_image_file,
+            imageSize: question.mcq_option_b_image_size,
           },
           {
             label: 'C',
             value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_c || '').trim())),
             imageFile: question.mcq_option_c_image_file,
+            imageSize: question.mcq_option_c_image_size,
           },
           {
             label: 'D',
             value: ensureMathModeForMcqOption(renderBody(String(question.mcq_option_d || '').trim())),
             imageFile: question.mcq_option_d_image_file,
+            imageSize: question.mcq_option_d_image_size,
           },
         ];
         lines.push('\\begin{enumerate}[label=\\textbf{(\\Alph*)}]');
@@ -1902,7 +2060,7 @@ const buildExamLatex = ({
           }
           if (option.imageFile) {
             lines.push('\\begin{center}');
-            lines.push(`\\includegraphics[draft=false,width=0.30\\textwidth]{${option.imageFile}}`);
+            lines.push(`\\includegraphics[draft=false,width=${imageWidthBySize(option.imageSize || 'medium')}]{${option.imageFile}}`);
             lines.push('\\end{center}');
           }
           if (!option.value && !option.imageFile) {
@@ -1937,6 +2095,8 @@ const buildExamLatex = ({
         lines.push('');
       }
     }
+
+    return dottedLinesHandledBySubparts;
   };
 
   // Group consecutive questions by renumbered base so subparts can render under one header.
@@ -1970,12 +2130,12 @@ const buildExamLatex = ({
         const displayLabel = `Question ${formatQuestionDisplayNumber(subD)}`;
 
         lines.push(toQuestionMarker(subQ, sourceQuestionIndex));
-
         lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
         lines.push(`\\textbf{${escapeLatexText(displayLabel)}}${subMarks > 0 ? ` & \\textbf{${subMarks}}` : ' & '}\\\\[0.5em]`);
         lines.push('\\end{tabular*}');
         lines.push('');
-        renderQuestionContent(subQ, lines, '', !includeQuestionContent);
+        const handledDottedLines = renderQuestionContent(subQ, lines, '', !includeQuestionContent);
+        if (!handledDottedLines) appendDottedAnswerLines(lines, subQ.dotted_answer_line_count);
         if (gi < groupQuestions.length - 1) {
           lines.push('\\vspace{0.5em}');
         }
@@ -2004,12 +2164,12 @@ const buildExamLatex = ({
         const displayLabel = `Question ${formatQuestionDisplayNumber(subD)}`;
 
         lines.push(toQuestionMarker(subQ, sourceQuestionIndex));
-
         lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
         lines.push(`\\textbf{${escapeLatexText(displayLabel)}}${subMarks > 0 ? ` & \\textbf{${subMarks}}` : ' & '}\\\\[0.5em]`);
         lines.push('\\end{tabular*}');
         lines.push('');
-        renderQuestionContent(subQ, lines, '', !includeQuestionContent);
+        const handledDottedLines = renderQuestionContent(subQ, lines, '', !includeQuestionContent);
+        if (!handledDottedLines) appendDottedAnswerLines(lines, subQ.dotted_answer_line_count);
         if (gi < groupQuestions.length - 1) {
           lines.push('\\vspace{0.5em}');
         }
@@ -2025,7 +2185,8 @@ const buildExamLatex = ({
       lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
       lines.push(`\\textbf{${escapeLatexText(questionLabel)}}${marksLabel ? ` & \\textbf{${escapeLatexText(marksLabel)}}` : ' & '}\\\\[0.5em]`);
       lines.push('\\end{tabular*}');
-      renderQuestionContent(question, lines, '', !includeQuestionContent);
+      const handledDottedLines = renderQuestionContent(question, lines, '', !includeQuestionContent);
+      if (!handledDottedLines) appendDottedAnswerLines(lines, question.dotted_answer_line_count);
       lines.push('\\vspace{0.9em}');
       bodyParts.push(['\\filbreak', lines.join('\n')].join('\n'));
       cursor += 1;
@@ -2033,12 +2194,67 @@ const buildExamLatex = ({
   }
 
   const body = bodyParts.join('\n\n');
+  const includeCoverPage = Boolean(pdfOptions?.includeCoverPage);
+  const hideDefaultHeader = Boolean(pdfOptions?.hideDefaultHeader);
+  const coverPageTitle = String(pdfOptions?.coverPageTitle || title).trim() || title;
+  const coverPageSubtitle = String(pdfOptions?.coverPageSubtitle || subtitle).trim();
+  const coverPageFooter = String(pdfOptions?.coverPageFooter || '').trim();
+  const fontFamily = (['lmodern', 'sans', 'palatino'].includes(String(pdfOptions?.fontFamily || ''))
+    ? pdfOptions?.fontFamily
+    : 'lmodern') as 'lmodern' | 'sans' | 'palatino';
+  const fontSizePt = Math.min(14, Math.max(9, Number(pdfOptions?.fontSizePt ?? 11)));
+  const fontPackages = fontFamily === 'palatino'
+    ? '\\usepackage{mathpazo}'
+    : fontFamily === 'sans'
+      ? '\\usepackage[scaled=0.95]{helvet}\n\\renewcommand{\\familydefault}{\\sfdefault}'
+      : '\\usepackage{lmodern}';
+  const fontSizeCommand = `\\AtBeginDocument{\\fontsize{${fontSizePt.toFixed(0)}pt}{${(fontSizePt * 1.28).toFixed(1)}pt}\\selectfont}`;
+  const watermarkEnabled = Boolean(pdfOptions?.watermarkEnabled);
+  const watermarkOpacity = Math.min(0.35, Math.max(0.02, Number(pdfOptions?.watermarkOpacity ?? 0.1)));
+  const watermarkImageScale = Math.min(0.95, Math.max(0.2, Number(pdfOptions?.watermarkImageScale ?? 0.66)));
+  const watermarkImageLayer = watermarkEnabled && watermarkImageFile
+    ? `
+      \\begin{tikzpicture}[remember picture, overlay]
+        \\node[opacity=${watermarkOpacity.toFixed(2)}] at (current page.center) {\\includegraphics[width=${watermarkImageScale.toFixed(2)}\\paperwidth]{${watermarkImageFile}}};
+      \\end{tikzpicture}`
+    : '';
+  const watermarkLatex = watermarkEnabled && watermarkImageFile
+    ? `\\newcommand{\\ApplyExamWatermark}{
+  \\AddToShipoutPictureBG{
+${watermarkImageLayer}
+  }
+}`
+    : '\\newcommand{\\ApplyExamWatermark}{}';
+  const coverPageBlock = includeCoverPage
+    ? `\\thispagestyle{empty}
+\\vspace*{\\fill}
+\\begin{center}
+{\\Huge \\textbf{${escapeLatexText(coverPageTitle)}}}\\\\[0.9em]
+${coverPageSubtitle ? `{\\Large ${escapeLatexText(coverPageSubtitle)}}\\\\[0.7em]` : ''}
+${coverPageFooter ? `{\\large ${escapeLatexText(coverPageFooter)}}` : ''}
+\\end{center}
+\\vspace*{\\fill}
+\\newpage
+
+`
+    : '';
+  const documentHeaderBlock = hideDefaultHeader
+    ? ''
+    : `\\begin{center}
+{\\LARGE \\textbf{${escapeLatexText(title)}}}\\\\[0.35em]
+{\\large ${escapeLatexText(subtitle)}}
+\\end{center}
+\\vspace{0.5em}
+\\hrule
+\\vspace{1em}
+
+`;
 
   return `\\documentclass[11pt]{article}
 \\usepackage[T1]{fontenc}
 \\usepackage[utf8]{inputenc}
 \\usepackage[a4paper,margin=1in]{geometry}
-\\usepackage{lmodern}
+${fontPackages}
 \\usepackage{microtype}
 \\usepackage{amsmath,amssymb,mathtools}
 \\usepackage{graphicx}
@@ -2046,6 +2262,8 @@ const buildExamLatex = ({
 \\usepackage{enumitem}
 \\usepackage{multirow}
 \\usepackage{xcolor}
+\\usepackage{eso-pic}
+\\usepackage{tikz}
 \\usepackage[strings]{underscore}
 \\setkeys{Gin}{draft=false}
 \\DeclareMathOperator{\\cosec}{cosec}
@@ -2075,15 +2293,14 @@ const buildExamLatex = ({
 \\DeclareUnicodeCharacter{03A9}{\\ensuremath{\\Omega}}
 \\setlength{\\parskip}{0.6em}
 \\setlength{\\parindent}{0pt}
+${fontSizeCommand}
+
+${watermarkLatex}
 
 \\begin{document}
-\\begin{center}
-{\\LARGE \\textbf{${escapeLatexText(title)}}}\\\\[0.35em]
-{\\large ${escapeLatexText(subtitle)}}
-\\end{center}
-\\vspace{0.5em}
-\\hrule
-\\vspace{1em}
+\\ApplyExamWatermark
+${coverPageBlock}
+${documentHeaderBlock}
 
 ${body}
 
@@ -2094,13 +2311,15 @@ const buildTexAssetZip = async ({
   tex,
   tempDir,
   questions,
+  extraAssets = [],
 }: {
   tex: string;
   tempDir: string;
   questions: ExportQuestion[];
+  extraAssets?: string[];
 }) => {
   const zip = new JSZip();
-  const referencedAssets = getReferencedAssetFilenames(questions);
+  const referencedAssets = Array.from(new Set([...getReferencedAssetFilenames(questions), ...extraAssets.filter(Boolean)]));
 
   zip.file(LOCAL_TEX_FILENAME, tex);
 
@@ -2315,6 +2534,26 @@ export async function POST(request: Request) {
     const wantsTexZip = outputFormat === 'tex-zip';
     const autoFixExport = Boolean(body?.autoFixExport);
     const includeQuestionContent = body?.includeQuestionContent === undefined ? true : Boolean(body?.includeQuestionContent);
+    const rawPdfOptions = body?.pdfOptions && typeof body.pdfOptions === 'object'
+      ? body.pdfOptions as Record<string, unknown>
+      : {};
+    const pdfOptions: ExportPdfOptions = {
+      hideDefaultHeader: Boolean(rawPdfOptions?.hideDefaultHeader),
+      includeCoverPage: Boolean(rawPdfOptions?.includeCoverPage),
+      coverPageTitle: String(rawPdfOptions?.coverPageTitle || '').trim().slice(0, 180),
+      coverPageSubtitle: String(rawPdfOptions?.coverPageSubtitle || '').trim().slice(0, 220),
+      coverPageFooter: String(rawPdfOptions?.coverPageFooter || '').trim().slice(0, 220),
+      fontFamily: (['lmodern', 'sans', 'palatino'].includes(String(rawPdfOptions?.fontFamily || ''))
+        ? rawPdfOptions?.fontFamily
+        : 'lmodern') as 'lmodern' | 'sans' | 'palatino',
+      fontSizePt: Math.min(14, Math.max(9, Number(rawPdfOptions?.fontSizePt ?? 11))),
+      dottedAnswerLinesEnabled: Boolean(rawPdfOptions?.dottedAnswerLinesEnabled),
+      dottedAnswerLineCount: Math.min(12, Math.max(1, Number(rawPdfOptions?.dottedAnswerLineCount ?? 3))),
+      watermarkEnabled: Boolean(rawPdfOptions?.watermarkEnabled),
+      watermarkImageData: String(rawPdfOptions?.watermarkImageData || '').trim(),
+      watermarkOpacity: Math.min(0.35, Math.max(0.02, Number(rawPdfOptions?.watermarkOpacity ?? 0.1))),
+      watermarkImageScale: Math.min(0.95, Math.max(0.2, Number(rawPdfOptions?.watermarkImageScale ?? 0.66))),
+    };
 
     if (!questions.length) {
       return Response.json({ error: 'At least one question is required to export TeX' }, { status: 400 });
@@ -2329,6 +2568,9 @@ export async function POST(request: Request) {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'export-exam-pdf-'));
     try {
       const enrichedQuestions = await attachQuestionImageAssets(questions, tempDir, includeSolutions);
+      const watermarkImageFile = pdfOptions.watermarkImageData
+        ? await writeQuestionImageAsset(tempDir, 'custom-watermark', pdfOptions.watermarkImageData)
+        : null;
 
       const primaryTex = buildExamLatex({
         title,
@@ -2337,6 +2579,8 @@ export async function POST(request: Request) {
         paperGrade,
         includeSolutions,
         includeQuestionContent,
+        pdfOptions,
+        watermarkImageFile,
         questions: enrichedQuestions,
       });
 
@@ -2357,6 +2601,7 @@ export async function POST(request: Request) {
           tex: primaryTex,
           tempDir,
           questions: enrichedQuestions,
+          extraAssets: watermarkImageFile ? [watermarkImageFile] : [],
         });
         const filename = `${baseFilename}.zip`;
         return new Response(new Uint8Array(zipBuffer), {
@@ -2380,6 +2625,8 @@ export async function POST(request: Request) {
             paperGrade,
             includeSolutions,
             includeQuestionContent,
+            pdfOptions,
+            watermarkImageFile,
             questions: enrichedQuestions,
             compileSafeMode: true,
           }),
@@ -2396,6 +2643,8 @@ export async function POST(request: Request) {
             paperGrade,
             includeSolutions,
             includeQuestionContent,
+            pdfOptions,
+            watermarkImageFile,
             questions: enrichedQuestions,
             compileSafeMode: true,
             plainTextMode: true,
@@ -2463,6 +2712,8 @@ export async function POST(request: Request) {
                 paperGrade,
                 includeSolutions,
                 includeQuestionContent,
+                pdfOptions,
+                watermarkImageFile,
                 questions: rewrittenQuestions,
               }),
             },
@@ -2475,6 +2726,8 @@ export async function POST(request: Request) {
                 paperGrade,
                 includeSolutions,
                 includeQuestionContent,
+                pdfOptions,
+                watermarkImageFile,
                 questions: rewrittenQuestions,
                 compileSafeMode: true,
               }),
@@ -2491,6 +2744,8 @@ export async function POST(request: Request) {
                 paperGrade,
                 includeSolutions,
                 includeQuestionContent,
+                pdfOptions,
+                watermarkImageFile,
                 questions: rewrittenQuestions,
                 compileSafeMode: true,
                 plainTextMode: true,
