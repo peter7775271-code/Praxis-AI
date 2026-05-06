@@ -15,13 +15,6 @@ export type DashboardViewMode =
   | 'papers'
   | 'paper';
 
-export type HeatmapCell = {
-  dateKey: string;
-  label: string;
-  count: number;
-  inMonth: boolean;
-};
-
 export type TopicStat = {
   topic: string;
   attempts: number;

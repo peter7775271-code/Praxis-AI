@@ -2,14 +2,12 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { BrochureCarousel } from "@/components/BrochureCarousel";
+import { FeatureCarousel, type FeatureSlide } from "@/components/FeatureCarousel";
 import {
   ArrowRight,
   Zap,
-  Brain,
-  Timer,
   Sparkles,
-  Layers,
-  LineChart,
   BookOpen,
   Menu,
   X,
@@ -105,6 +103,7 @@ const styles = `
 export default function Home() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [showNavLinks, setShowNavLinks] = useState(false);
   const [questionCount, setQuestionCount] = useState<number | null>(null);
   const [displayedQuestionCount, setDisplayedQuestionCount] = useState<number | null>(null);
 
@@ -117,6 +116,7 @@ export default function Home() {
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 20);
+      setShowNavLinks(window.scrollY > window.innerHeight * 0.7);
 
       const reveals = document.querySelectorAll(".reveal");
       reveals.forEach((reveal) => {
@@ -198,6 +198,67 @@ export default function Home() {
     { label: "Question Bank", href: "#question-bank" },
     { label: "Pricing", href: "#pricing" },
   ];
+  const featureSlides: FeatureSlide[] = [
+    {
+      eyebrow: "Feature 01",
+      title: "A library that actually covers the syllabus.",
+      icon: <BookOpen size={22} />,
+      tagline: "Every question tagged, sourced and filterable - no scrolling through a feed.",
+      highlights: [
+        { value: formattedQuestionCount ?? "4k+", label: "Questions" },
+        { value: "4", label: "Maths courses" },
+        { value: "100%", label: "Exam style" },
+      ],
+      bullets: [
+        "Tagged by topic, subtopic and dot point",
+        "Worked solutions on every single question",
+        "Images and diagrams included where they matter",
+      ],
+      pills: [
+        { label: "Maths Ext 2" },
+        { label: "Maths Ext 1" },
+        { label: "Maths Advanced" },
+        { label: "Maths Standard" },
+        { label: "Chem - soon", muted: true },
+        { label: "Bio - soon", muted: true },
+        { label: "Physics - soon", muted: true },
+      ],
+      image: "/features/library.png",
+      imageAlt: "Question library preview",
+    },
+    {
+      eyebrow: "Feature 02",
+      title: "Custom topic tests in minutes, not hours.",
+      icon: <SlidersHorizontal size={22} />,
+      tagline: "Tune a paper for your class, export it, and keep it forever.",
+      highlights: [
+        { value: "5", label: "Filters" },
+        { value: "4", label: "Export modes" },
+        { value: "100%", label: "Yours to keep" },
+      ],
+      bullets: [
+        "Filter by topic, subtopic, difficulty, grade and subject",
+        "Hand-pick the exact questions you want included",
+        "Style the PDF: title, font, size, watermark, blank lines",
+        "Export questions, with solutions, solutions only, or raw LaTeX",
+      ],
+      pills: [
+        { label: "PDF" },
+        { label: "LaTeX" },
+        { label: "No strings attached" },
+      ],
+      image: "/features/exam-builder.png",
+      imageAlt: "Custom exam builder preview",
+    },
+  ];
+
+  const brochurePages = [
+    "/brochure/page-1.jpg",
+    "/brochure/page-2.jpg",
+    "/brochure/page-3.jpg",
+    "/brochure/page-4.jpg",
+    "/brochure/page-5.jpg",
+  ];
 
   return (
     <div className="relative bg-white text-neutral-900">
@@ -214,7 +275,12 @@ export default function Home() {
             </span>
           </a>
 
-          <div className="hidden md:flex items-center space-x-12">
+          <div
+            className={`hidden md:flex items-center space-x-12 transition-all duration-500 ${
+              showNavLinks ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 -translate-y-2 pointer-events-none"
+            }`}
+            aria-hidden={!showNavLinks}
+          >
             {navItems.map((item) => (
               <a key={item.label} href={item.href} className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500 hover:text-primary transition-colors">
                 {item.label}
@@ -265,14 +331,15 @@ export default function Home() {
               <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">{formattedQuestionCount ? `${formattedQuestionCount} ${questionCountLabel}` : "Exam style questions"}</span>
             </div>
 
-            <h1 className="text-6xl md:text-8xl font-light leading-[1.1] tracking-tight">
-              Master the <br />
-              <span className="font-serif italic font-normal">Exam,</span> <br />
-              <span className="font-bold gold-shimmer-text">Own the Result.</span>
+            <h1 className="text-5xl md:text-7xl font-light leading-[1.1] tracking-tight">
+              A question bank <br />
+              built like a <br />
+              <span className="font-serif italic font-normal">filing cabinet,</span> <br />
+              <span className="font-bold gold-shimmer-text">not a feed.</span>
             </h1>
 
             <p className="text-lg text-neutral-500 max-w-lg leading-relaxed font-light">
-              Don&apos;t just study—practice with thousands of board-certified questions. Create custom exams tailored to your specific weak points.
+              12,760 vetted HSC, VCE and QCE exam-style questions across Maths, Physics, Chemistry and Biology - every item tagged, sourced, and filterable. Build a topic test in under ten minutes.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6 pt-4">
@@ -289,24 +356,15 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="relative reveal animate-float hidden lg:block">
-            <div className="glass rounded-[3rem] p-4 shadow-2xl border-white/50 relative z-20 overflow-hidden">
-              <div className="bg-white rounded-[2.5rem] p-10 space-y-8">
-                <div className="flex justify-between items-center border-b border-neutral-100 pb-6">
-                  <div className="space-y-1">
-                    <div className="text-[10px] font-bold text-[#b5a45d] uppercase tracking-widest">Question Bank Archive</div>
-                    <div className="text-3xl font-bold">{formattedQuestionCount ?? ""}</div>
-                  </div>
-                  <BookOpen size={32} className="text-neutral-900" />
-                </div>
-                <div className="space-y-4">
-                  {["Mathematics", "Chemistry", "Physics", "Biology"].map((subject) => (
-                    <div key={subject} className="flex items-center justify-between p-3 bg-neutral-50 rounded-xl">
-                      <span className="text-sm font-medium">{subject}</span>
-                      <span className="text-[10px] font-bold text-neutral-400">1,000+ Qs</span>
-                    </div>
-                  ))}
-                </div>
+          <div className="relative reveal lg:justify-self-end w-full max-w-[52rem]">
+            <div className="absolute -inset-6 rounded-[3rem] bg-[radial-gradient(circle_at_top_right,rgba(181,164,93,0.18),transparent_55%)] blur-2xl"></div>
+            <div className="relative z-10 grid grid-cols-1 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)] gap-8 items-center">
+              <BrochureCarousel pages={brochurePages} className="max-w-[28rem] sm:max-w-[30rem] lg:justify-self-start" />
+
+              <div className="lg:pl-2">
+                <p className="text-xl sm:text-xl font-medium tracking-tight text-neutral-800 leading-snug">
+                  
+                </p>
               </div>
             </div>
           </div>
@@ -322,101 +380,110 @@ export default function Home() {
             </h3>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="md:col-span-2 glass rounded-[3rem] p-12 flex flex-col justify-between overflow-hidden relative reveal group shadow-sm">
-              <div className="absolute top-0 right-0 p-12 opacity-[0.03] group-hover:opacity-[0.07] transition-opacity">
-                <Layers size={240} />
-              </div>
-              <div className="space-y-6 relative z-10">
-                <div className="w-14 h-14 bg-neutral-900 rounded-2xl flex items-center justify-center text-white">
-                  <BookOpen size={24} />
-                </div>
-                <h4 className="text-4xl font-bold tracking-tight text-neutral-900">Massive Question Library</h4>
-                <p className="text-neutral-500 text-lg max-w-md leading-relaxed">
-                  {formattedQuestionCount ? (
-                    <>
-                      Access over <span className="text-neutral-900 font-bold">{formattedQuestionCount} {questionCountLabel}</span> designed to mimic the exact style and rigor of real national examinations.
-                    </>
-                  ) : (
-                    <>
-                      Access a growing archive of exam style questions designed to mimic the exact style and rigor of real national examinations.
-                    </>
-                  )}
-                </p>
-              </div>
-              <div className="pt-12 relative z-10">
-                <div className="flex flex-wrap gap-2">
-                  {["Grade 9", "Grade 10", "Grade 11", "Grade 12"].map((grade) => (
-                    <span key={grade} className="px-4 py-2 bg-neutral-100 rounded-full text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-                      {grade}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="glass rounded-[3rem] p-12 flex flex-col justify-between reveal group shadow-2xl border-neutral-100">
-              <div className="space-y-6">
-                <div className="w-14 h-14 bg-neutral-900 rounded-2xl flex items-center justify-center text-white">
-                  <SlidersHorizontal size={24} />
-                </div>
-                <h4 className="text-3xl font-semibold tracking-tight leading-tight text-neutral-900">Custom Exam Architect</h4>
-                <p className="text-neutral-500 text-sm leading-relaxed">
-                  Build your own exams by selecting specific <span className="text-neutral-900 font-medium">topics, years, and difficulty levels</span>. Practice only what you need.
-                </p>
-              </div>
-              <Link href="/dashboard" className="w-full mt-10 py-5 bg-neutral-900 text-white rounded-2xl text-[10px] font-bold uppercase tracking-[0.2em] hover:bg-primary transition-all shadow-lg text-center">
-                Start Building
-              </Link>
-            </div>
-
-            <div className="glass rounded-[3rem] p-10 flex flex-col justify-between reveal">
-              <div className="space-y-4">
-                <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
-                  <Timer size={22} />
-                </div>
-                <h4 className="text-xl font-bold text-neutral-900">Authentic Simulation</h4>
-                <p className="text-sm text-neutral-400 leading-relaxed">
-                  Simulate real boards like <span className="text-neutral-900 font-medium">SAT, IB, and GCSE</span> with official timers and formatting.
-                </p>
-              </div>
-            </div>
-
-            <div id="analytics" className="glass rounded-[3rem] p-10 flex flex-col justify-between reveal" style={{ transitionDelay: "0.1s" }}>
-              <div className="space-y-4">
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: "rgba(181, 164, 93, 0.1)", color: "#b5a45d" }}>
-                  <Brain size={22} />
-                </div>
-                <h4 className="text-xl font-bold text-neutral-900">AI Step-by-Step</h4>
-                <p className="text-sm text-neutral-400 leading-relaxed">Stuck? Our AI tutor breaks down complex problems into manageable logical steps.</p>
-              </div>
-            </div>
-
-            <div className="glass rounded-[3rem] p-10 flex flex-col justify-between reveal" style={{ transitionDelay: "0.2s" }}>
-              <div className="space-y-4">
-                <div className="w-12 h-12 bg-neutral-100 text-neutral-900 rounded-xl flex items-center justify-center">
-                  <LineChart size={22} />
-                </div>
-                <h4 className="text-xl font-bold text-neutral-900">Topic Mastery Hub</h4>
-                <p className="text-sm text-neutral-400 leading-relaxed">Identify exactly which topics are dragging down your average with visual heatmaps.</p>
-              </div>
-            </div>
+          <div id="analytics" className="reveal">
+            <FeatureCarousel slides={featureSlides} />
           </div>
         </div>
       </section>
 
-      <section id="pricing" className="py-40 bg-neutral-50 relative overflow-hidden">
-        <div className="max-w-4xl mx-auto px-8 text-center space-y-12 reveal">
-          <h2 className="text-6xl md:text-7xl font-light leading-tight tracking-tighter">
-            Elevate your <span className="font-serif italic">Potential.</span>
-          </h2>
-          <p className="text-xl text-neutral-400 font-light max-w-xl mx-auto">
-            Stop guessing what will be on the test. Join the elite students practicing with the world&apos;s largest certified archive.
-          </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link href="/signup" className="w-full sm:w-auto bg-neutral-900 text-white px-12 py-6 rounded-full font-bold uppercase tracking-widest text-xs hover:bg-primary transition-all shadow-2xl text-center">
-              Get Instant Access
-            </Link>
+      <section id="pricing" className="py-32 bg-neutral-50 relative overflow-hidden">
+        <div className="max-w-7xl mx-auto px-8 space-y-14 reveal">
+          <div className="text-center space-y-4">
+            <h2 className="text-[10px] font-bold text-[#b5a45d] uppercase tracking-[0.35em]">Pricing</h2>
+            <h3 className="text-5xl md:text-6xl font-light tracking-tight leading-tight">
+              Pick the plan that <span className="font-serif italic text-neutral-500">fits your year</span>
+            </h3>
+            <p className="text-neutral-500 max-w-2xl mx-auto">
+              Transparent pricing, fast setup, and unlimited exports after generation.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="rounded-[2rem] border border-neutral-200 bg-white p-6 sm:p-8 shadow-xl shadow-neutral-900/5">
+              <div className="space-y-3">
+                <h4 className="text-3xl font-semibold tracking-tight">Standard</h4>
+                <div className="flex items-end gap-2">
+                  <span className="text-5xl font-bold leading-none">$99</span>
+                  <span className="text-sm text-neutral-500 pb-1">/ month</span>
+                </div>
+                <p className="text-sm text-neutral-500">Year 11 or Year 12 - pick one</p>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {["Year 11 only", "Year 12 only"].map((pill) => (
+                    <span key={pill} className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-[11px] font-semibold text-neutral-600">
+                      {pill}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <ul className="mt-7 space-y-3 text-sm text-neutral-600">
+                {[
+                  "All 4 maths subjects",
+                  "Filter by topic, subtopic and dot point",
+                  "LaTeX questions + worked solutions",
+                  "Images included where needed",
+                  "30 exam generation tokens / month",
+                  "Unlimited PDF exports after generation",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-3">
+                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-[#3b82f6]" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <Link
+                href="/signup"
+                className="mt-8 block w-full rounded-xl border border-neutral-300 bg-white py-3 text-center text-sm font-semibold text-neutral-900 transition hover:bg-neutral-100"
+              >
+                Choose Standard
+              </Link>
+            </div>
+
+            <div className="rounded-[2rem] border-2 border-[#2563eb] bg-white p-6 sm:p-8 shadow-2xl shadow-blue-900/10 relative">
+              <span className="absolute left-8 top-0 -translate-y-1/2 rounded-full bg-blue-100 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-blue-700">
+                Most popular
+              </span>
+
+              <div className="space-y-3">
+                <h4 className="text-3xl font-semibold tracking-tight">Pro</h4>
+                <div className="flex items-end gap-2">
+                  <span className="text-5xl font-bold leading-none">$199</span>
+                  <span className="text-sm text-neutral-500 pb-1">/ month</span>
+                </div>
+                <p className="text-sm text-neutral-500">Year 11 and Year 12 - both included</p>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {["Year 11", "Year 12"].map((pill) => (
+                    <span key={pill} className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-[11px] font-semibold text-neutral-600">
+                      {pill}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <ul className="mt-7 space-y-3 text-sm text-neutral-700">
+                {[
+                  "Everything in Standard",
+                  "Both year levels included",
+                  "100 exam generation tokens / month",
+                  "Unlimited PDF exports after generation",
+                  "Unlimited tutor accounts",
+                  "Priority support",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-3">
+                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-[#4c1d95]" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <Link
+                href="/signup"
+                className="mt-8 block w-full rounded-xl bg-[#2563eb] py-3 text-center text-sm font-semibold text-white transition hover:bg-[#1d4ed8]"
+              >
+                Choose Pro
+              </Link>
+            </div>
           </div>
         </div>
       </section>

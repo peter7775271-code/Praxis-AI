@@ -86,7 +86,6 @@ import {
 import type {
   DashboardViewMode,
   ExamBuilderParams,
-  HeatmapCell,
   TopicStat,
 } from './types';
 import { ComboboxDemo } from '@/components/ui/demo';
@@ -128,18 +127,6 @@ const isQuotaExceededError = (error: unknown) => {
   }
   const message = String((error as { message?: string })?.message || '').toLowerCase();
   return message.includes('quota') && message.includes('exceed');
-};
-
-const pad2 = (value: number) => String(value).padStart(2, '0');
-
-const toLocalDateKey = (date: Date) => {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-};
-
-const addDays = (date: Date, delta: number) => {
-  const next = new Date(date);
-  next.setDate(date.getDate() + delta);
-  return next;
 };
 
 export default function DashboardApp({ initialViewMode = 'dashboard' }: { initialViewMode?: DashboardViewMode }) {
@@ -408,8 +395,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [syllabusTopic, setSyllabusTopic] = useState<string | null>(null);
-  const [heatmapMonth, setHeatmapMonth] = useState<number>(new Date().getMonth());
-  const [heatmapYear] = useState<number>(new Date().getFullYear());
   const excalidrawSceneRef = useRef<{
     elements: readonly ExcalidrawElement[];
     appState: ExcalidrawAppState;
@@ -969,13 +954,50 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
 
   const parseQuestionNumberParts = (qNumber: string | null | undefined) => {
     const raw = String(qNumber ?? '').trim();
-    const match = raw.match(/^(\d+)\s*\(?([a-z])\)?(?:\s*\(?((?:ix|iv|v?i{0,3}|x))\)?)?$/i);
-    return {
-      raw,
-      number: match?.[1] ? Number.parseInt(match[1], 10) : null,
-      letter: match?.[2] ? match[2].toLowerCase() : '',
-      roman: match?.[3] ? match[3].toLowerCase() : '',
-    };
+    const numberMatch = raw.match(/^(\d+)\s*(.*)$/);
+    if (!numberMatch) {
+      return { raw, number: null as number | null, letter: '', roman: '' };
+    }
+    const number = Number.parseInt(numberMatch[1], 10);
+    const remainder = numberMatch[2].trim();
+    if (!remainder) {
+      return { raw, number, letter: '', roman: '' };
+    }
+    // Recognize roman-only suffixes like "(i)", "(ii)", "(iii)" first — otherwise the
+    // single-letter regex below greedily eats the leading "i" as a letter sub-part,
+    // producing letter="i" + roman="i"/"ii" and corrupting downstream labels.
+    const romanOnly = remainder.match(/^\(?((?:ix|iv|v?i{1,3}|x))\)?$/i);
+    if (romanOnly) {
+      return { raw, number, letter: '', roman: romanOnly[1].toLowerCase() };
+    }
+    const letterMaybeRoman = remainder.match(/^\(?([a-z])\)?(?:\s*\(?((?:ix|iv|v?i{1,3}|x))\)?)?$/i);
+    if (letterMaybeRoman) {
+      return {
+        raw,
+        number,
+        letter: letterMaybeRoman[1].toLowerCase(),
+        roman: letterMaybeRoman[2] ? letterMaybeRoman[2].toLowerCase() : '',
+      };
+    }
+    return { raw, number, letter: '', roman: '' };
+  };
+
+  /**
+   * Replace any [[PART_DIVIDER:...]] labels found in a saved merged-question payload with
+   * sequential roman-numeral labels: (i), (ii), (iii), ... This repairs DB rows where
+   * past merging produced stacked labels like "(i)(i)" or "(i)(ii)".
+   */
+  const renumberPartDividerLabels = (value: string) => {
+    const sequence = [
+      'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x',
+      'xi', 'xii', 'xiii', 'xiv', 'xv', 'xvi', 'xvii', 'xviii', 'xix', 'xx',
+    ];
+    let counter = 0;
+    return String(value || '').replace(/\[\[PART_DIVIDER:[^\]]*\]\]/g, () => {
+      const numeral = sequence[counter] || `p${counter + 1}`;
+      counter += 1;
+      return `[[PART_DIVIDER:(${numeral})]]`;
+    });
   };
 
   /** Contiguous group of questions sharing the same display base that contains the given index. */
@@ -1018,7 +1040,10 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     const letterSetSize = new Set(parsedEntries.map((entry) => entry.parts.letter || '__')).size;
     const sameLetter = letterSetSize === 1 && allHaveLetter;
 
-    const useRomanOnlyLabels = allSameNumber && sameLetter && allHaveRoman;
+    // letterSetSize === 1 covers two valid cases for roman-only grouping:
+    //   1) all entries share the same letter sub-part (e.g. 17(a)(i), 17(a)(ii))
+    //   2) no entry has a letter at all (e.g. 29 (i), 29 (ii), 29 (iii))
+    const useRomanOnlyLabels = allSameNumber && letterSetSize === 1 && allHaveRoman;
     const useLetterOnlyLabels = allSameNumber && allHaveLetter && !useRomanOnlyLabels;
 
     const displayBase = useLetterOnlyLabels
@@ -1031,7 +1056,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     const mergedCarrier = group.find((q) => String(q.question_text || '').includes('[[PART_DIVIDER:'));
 
     const questionText = mergedCarrier
-      ? String(mergedCarrier.question_text || '')
+      ? renumberPartDividerLabels(String(mergedCarrier.question_text || ''))
       : group
         .map((q) => {
           const parts = parseQuestionNumberParts(q.question_number);
@@ -1449,93 +1474,6 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
       })
       .sort((a, b) => a.topic.localeCompare(b.topic));
   }, [savedAttempts]);
-
-  const activityMap = useMemo(() => {
-    const map = new Map<string, { count: number; date: Date }>();
-
-    const record = (date: Date, count: number) => {
-      const dayKey = toLocalDateKey(date);
-      const dayDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-      const existing = map.get(dayKey);
-      map.set(dayKey, {
-        count: (existing?.count ?? 0) + count,
-        date: dayDate,
-      });
-    };
-
-    savedAttempts.forEach((attempt) => {
-      const savedAt = attempt?.savedAt;
-      if (!savedAt) return;
-      const date = new Date(savedAt);
-      if (Number.isNaN(date.getTime())) return;
-      let increment = 1;
-      if (attempt?.type === 'exam' && Array.isArray(attempt.examAttempts)) {
-        increment = Math.max(1, attempt.examAttempts.length);
-      }
-      record(date, increment);
-    });
-
-    return map;
-  }, [savedAttempts]);
-
-  const heatmapCells = useMemo<HeatmapCell[]>(() => {
-    const firstDay = new Date(heatmapYear, heatmapMonth, 1);
-    const startWeekday = firstDay.getDay();
-    const daysInMonth = new Date(heatmapYear, heatmapMonth + 1, 0).getDate();
-    const totalCells = Math.ceil((startWeekday + daysInMonth) / 7) * 7;
-    const cells: HeatmapCell[] = [];
-
-    for (let i = 0; i < totalCells; i += 1) {
-      const dayNumber = i - startWeekday + 1;
-      const inMonth = dayNumber >= 1 && dayNumber <= daysInMonth;
-      if (!inMonth) {
-        cells.push({
-          dateKey: `empty-${heatmapYear}-${heatmapMonth}-${i}`,
-          label: '',
-          count: 0,
-          inMonth: false,
-        });
-        continue;
-      }
-      const date = new Date(heatmapYear, heatmapMonth, dayNumber);
-      const key = toLocalDateKey(date);
-      const count = activityMap.get(key)?.count ?? 0;
-      cells.push({
-        dateKey: key,
-        label: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
-        count,
-        inMonth: true,
-      });
-    }
-
-    return cells;
-  }, [activityMap, heatmapMonth, heatmapYear]);
-
-  const studyStreak = useMemo(() => {
-    if (activityMap.size === 0) return 0;
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    let latest: Date | null = null;
-
-    activityMap.forEach((value) => {
-      if (value.date > todayStart) return;
-      if (!latest || value.date > latest) {
-        latest = value.date;
-      }
-    });
-
-    if (!latest) return 0;
-    let streak = 0;
-    let cursor = new Date(latest);
-    while (true) {
-      const key = toLocalDateKey(cursor);
-      const count = activityMap.get(key)?.count ?? 0;
-      if (count <= 0) break;
-      streak += 1;
-      cursor = addDays(cursor, -1);
-    }
-    return streak;
-  }, [activityMap]);
 
   const hasManageFilters = useMemo(() => {
     return (
@@ -5364,13 +5302,17 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
             <div className={`${viewMode === 'paper' ? 'max-w-[68rem] mx-auto w-full space-y-8 lg:translate-x-2' : viewMode === 'exam' ? 'w-full space-y-8' : 'max-w-5xl mx-auto space-y-8'}`}>
               {viewMode === 'dashboard' && (
                 <DashboardView
-                  setViewMode={setViewMode}
-                  heatmapCells={heatmapCells}
-                  studyStreak={studyStreak}
-                  studentName={userName}
-                  heatmapMonth={heatmapMonth}
-                  heatmapYear={heatmapYear}
-                  onHeatmapMonthChange={(month) => setHeatmapMonth(month)}
+                  companyName={userCompanyName || userName || ''}
+                  questionTokensRemaining={userQuestionTokensBalance}
+                  planName={userPlan ? `${userPlan.charAt(0).toUpperCase()}${userPlan.slice(1)}` : 'Free'}
+                  onOpenExamArchitect={() => {
+                    setViewMode('builder');
+                    router.push('/dashboard/builder');
+                  }}
+                  onOpenSavedQuestions={() => {
+                    setViewMode('saved');
+                    router.push('/dashboard/saved');
+                  }}
                 />
               )}
               {viewMode === 'analytics' && (

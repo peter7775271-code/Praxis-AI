@@ -141,7 +141,7 @@ const collapseDuplicateDisplayMathDelimiters = (value: string) =>
     // Collapse repeated display-close delimiters like "\\]\\n\\]".
     .replace(/(?:\s*\\\]){2,}/g, '\n\\]');
 
-  const OVER_ESCAPED_COMMAND_PREFIX = '(?:frac|dfrac|sqrt|pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega|Delta|Sigma|Omega|leq|geq|neq|Rightarrow|leftrightarrow|to|times|div|pm|mp|sin|cos|tan|sec|cosec|cot|log|ln|exp|lim|vec|overrightarrow|overleftarrow|left|right|begin|end|text|operatorname|ensuremath|dots|ldots|cdots)';
+  const OVER_ESCAPED_COMMAND_PREFIX = '(?:frac|dfrac|sqrt|pi|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|omega|Delta|Sigma|Omega|leq|geq|neq|Rightarrow|leftrightarrow|to|times|div|pm|mp|sin|cos|tan|sec|cosec|cot|log|ln|exp|lim|vec|overrightarrow|overleftarrow|left|right|begin|end|text|textbf|textit|mathrm|mathit|mathbf|mathbb|mathcal|operatorname|ensuremath|dots|ldots|cdots)';
 
   const collapseOverEscapedDelimiters = (value: string) =>
     String(value || '').replace(/\\{2,}([\[\]\(\)])/g, (match, delimiter, offset, source) => {
@@ -693,13 +693,39 @@ const unwrapTextCommandOutsideMath = (value: string) =>
 const formatPartDividerLabel = (label: string) => {
   const trimmed = String(label || '').trim();
   if (!trimmed) return '(Part)';
-  // Keep labels that already contain explicit bracketed parts, e.g. "(i)" or "(i)(ii)".
-  if (/\([^)]+\)/.test(trimmed)) return trimmed;
+  // If the label has multiple stacked parenthetical groups (e.g. "(i)(ii)" from
+  // nested-source extraction), keep only the LAST group so we don't render duplicates.
+  const parentheticalGroups = Array.from(trimmed.matchAll(/\(([^()]+)\)/g)).map((m) => m[1]);
+  if (parentheticalGroups.length >= 1) {
+    return `(${parentheticalGroups[parentheticalGroups.length - 1]})`;
+  }
   return `(${trimmed})`;
+};
+
+const ROMAN_NUMERAL_SEQUENCE = [
+  'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x',
+  'xi', 'xii', 'xiii', 'xiv', 'xv', 'xvi', 'xvii', 'xviii', 'xix', 'xx',
+];
+
+const sequentialRomanLabel = (index: number) => {
+  const numeral = ROMAN_NUMERAL_SEQUENCE[index] || `p${index + 1}`;
+  return `(${numeral})`;
 };
 
 const PART_DIVIDER_DETECT_REGEX = /\[\[PART_DIVIDER:[^\]]+\]\]/;
 const PART_DIVIDER_CAPTURE_REGEX = /\[\[PART_DIVIDER:([^\]]+)\]\]/g;
+
+// Rewrites every [[PART_DIVIDER:...]] token in a source string so the labels are
+// strictly sequential (i), (ii), (iii), ... regardless of what the source had.
+// Repairs DB rows where past merges produced stacked labels like "(i)(ii)".
+const renumberPartDividerLabelsInSource = (value: string) => {
+  let counter = 0;
+  return String(value || '').replace(/\[\[PART_DIVIDER:[^\]]*\]\]/g, () => {
+    const label = sequentialRomanLabel(counter);
+    counter += 1;
+    return `[[PART_DIVIDER:${label}]]`;
+  });
+};
 
 const splitQuestionTextByPartDividers = (value: string) => {
   const source = String(value || '');
@@ -1411,6 +1437,10 @@ const parseQuestionNumberForDisplay = (questionNumber: string | null | undefined
   let subPart: string | null = null;
   let roman: string | null = null;
 
+  const romanOnly = remainder.match(/^\(?((?:ix|iv|v?i{0,3}|x{1,3}))\)?$/i);
+  if (romanOnly) {
+    roman = romanOnly[1].toLowerCase();
+  } else {
   // Match patterns like: a(i), (a)(i), a(ii), (b)(iii), a, (a), etc.
   const fullMatch = remainder.match(/^\(?([a-zA-Z])\)?\s*\(?((?:ix|iv|v?i{0,3}|x{1,3}))\)?$/i);
   if (fullMatch) {
@@ -1437,8 +1467,19 @@ const parseQuestionNumberForDisplay = (questionNumber: string | null | undefined
       }
     }
   }
+  }
 
   // firstSuffix: legacy compat — first meaningful suffix token
+  const romanTokenPattern = /^(?:ix|iv|v?i{0,3}|x{1,3})$/i;
+  if (subPart && !roman && romanTokenPattern.test(subPart)) {
+    roman = subPart;
+    subPart = null;
+  }
+
+  if (subPart && roman && romanTokenPattern.test(subPart) && romanTokenPattern.test(roman)) {
+    subPart = null;
+  }
+
   const firstSuffix = roman ?? subPart;
 
   return { baseKey, subPart, roman, firstSuffix };
@@ -1908,6 +1949,7 @@ const buildExamLatex = ({
   const appendDottedAnswerLines = (lines: string[], lineCountOverride?: number | null) => {
     if (!dottedAnswerLinesEnabled) return;
     const resolvedLineCount = normalizeDottedLineCountOverride(lineCountOverride) ?? dottedAnswerLineCount;
+    lines.push(`\\Needspace{${resolvedLineCount + 3}\\baselineskip}`);
     lines.push('\\vspace{0.35em}');
     for (let lineIndex = 0; lineIndex < resolvedLineCount; lineIndex += 1) {
       lines.push('\\noindent\\makebox[\\textwidth]{\\dotfill}\\\\[0.9em]');
@@ -1917,9 +1959,12 @@ const buildExamLatex = ({
   const parsedDetails = questions.map((question) => {
     const details = parseQuestionNumberForDisplay(question.question_number);
     const baseKey = details.baseKey;
+    const isRomanOnly = Boolean(details.roman && !details.subPart);
     const relatedKey = shouldGroupLetterSubparts
       ? (baseKey && details.subPart ? `letter:${baseKey}` : null)
-      : (baseKey && details.subPart && details.roman ? `roman:${baseKey}:${details.subPart}` : null);
+      : (baseKey && isRomanOnly
+        ? `roman-only:${baseKey}`
+        : (baseKey && details.subPart && details.roman ? `roman:${baseKey}:${details.subPart}` : null));
     const isRelatedGroup = Boolean(relatedKey);
 
     let mappedMain: number;
@@ -1943,8 +1988,9 @@ const buildExamLatex = ({
       ...details,
       mappedMain,
       isRelatedGroup,
+      isRomanOnly,
       displaySubPart: isRelatedGroup ? details.subPart : null,
-      displayRoman: isRelatedGroup ? details.roman : null,
+      displayRoman: isRelatedGroup && details.subPart ? details.roman : null,
     };
   });
 
@@ -1971,8 +2017,8 @@ const buildExamLatex = ({
     const questionType = question.question_type || 'written';
     const shouldRenderQuestionContent = !skipQuestionText;
     if (shouldRenderQuestionContent) {
-      const rawQuestionText = String(question.question_text || '');
-      if (dottedAnswerLinesEnabled && PART_DIVIDER_DETECT_REGEX.test(rawQuestionText)) {
+      const rawQuestionText = renumberPartDividerLabelsInSource(String(question.question_text || ''));
+      if (PART_DIVIDER_DETECT_REGEX.test(rawQuestionText)) {
         const { intro, parts } = splitQuestionTextByPartDividers(rawQuestionText);
         let renderedAnyQuestionText = false;
 
@@ -1984,13 +2030,16 @@ const buildExamLatex = ({
         }
 
         for (const [partIndex, part] of parts.entries()) {
-          const partSource = `[[PART_DIVIDER:${part.label}]] ${part.content || ''}`;
+          // Renumber labels sequentially as (i), (ii), (iii), ... so malformed source
+          // labels like "(i)(i)" / "(i)(ii)" don't surface in the rendered PDF.
+          const renumberedLabel = sequentialRomanLabel(partIndex);
+          const partSource = `[[PART_DIVIDER:${renumberedLabel}]] ${part.content || ''}`;
           const partText = renderBody(partSource);
           const partPrefix = (!renderedAnyQuestionText && partIndex === 0) ? inlinePrefix : '';
-          lines.push(`${partPrefix}${partText || `\\noindent\\textbf{${formatPartDividerLabel(part.label)}}`}`);
+          lines.push(`${partPrefix}${partText || `\\noindent\\textbf{${formatPartDividerLabel(renumberedLabel)}}`}`);
           lines.push('');
           const targetImagePartLabel = normalizePartLabelForMatch(question.graph_image_part_label);
-          const currentPartLabel = normalizePartLabelForMatch(formatPartDividerLabel(part.label));
+          const currentPartLabel = normalizePartLabelForMatch(formatPartDividerLabel(renumberedLabel));
           const shouldRenderImageForThisPart = question.graph_image_file && (
             (targetImagePartLabel && currentPartLabel === targetImagePartLabel)
             || (!targetImagePartLabel && partIndex === 0)
@@ -2107,6 +2156,59 @@ const buildExamLatex = ({
     const details = parsedDetails[cursor];
     const marks = Number(question.marks || 0);
     const marksLabel = marks > 0 ? `${marks} ${marks === 1 ? 'mark' : 'marks'}` : '';
+
+    if (details.isRelatedGroup && details.isRomanOnly) {
+      const groupMappedMain = details.mappedMain;
+      const groupStart = cursor;
+      while (cursor < questions.length) {
+        const d = parsedDetails[cursor];
+        if (d.mappedMain !== groupMappedMain || !d.isRelatedGroup || !d.isRomanOnly) break;
+        cursor += 1;
+      }
+
+      const groupQuestions = questions.slice(groupStart, cursor);
+      const groupDetails = parsedDetails.slice(groupStart, cursor);
+      const totalMarks = groupQuestions.reduce((sum, item) => sum + Number(item.marks || 0), 0);
+      const totalMarksLabel = totalMarks > 0 ? `${totalMarks} ${totalMarks === 1 ? 'mark' : 'marks'}` : '';
+      const lines: string[] = [];
+
+      lines.push('\\noindent\\begin{tabular*}{\\textwidth}{@{}l@{\\extracolsep{\\fill}}r@{}}');
+      lines.push(`\\textbf{${escapeLatexText(`Question ${groupMappedMain}`)}}${totalMarksLabel ? ` & \\textbf{${escapeLatexText(totalMarksLabel)}}` : ' & '}\\\\[0.5em]`);
+      lines.push('\\end{tabular*}');
+      lines.push('');
+
+      for (let gi = 0; gi < groupQuestions.length; gi += 1) {
+        const subQ = groupQuestions[gi];
+        const subD = groupDetails[gi];
+        const sourceQuestionIndex = groupStart + gi;
+        const romanLabel = subD.roman ? `(${subD.roman})` : '';
+        let rawQuestionText = String(subQ.question_text || '').trim();
+        if (subD.roman) {
+          // Strip any leading roman-numeral label so we don't double-print it alongside the inline prefix.
+          // Handles plain "(i)", "i)", styled variants like "**(i)**" / "\textbf{(i)}", and trailing punctuation.
+          const stripLeadingRomanLabel = new RegExp(
+            `^\\s*(?:\\*\\*\\s*|\\\\textbf\\s*\\{\\s*|\\\\emph\\s*\\{\\s*|\\\\textit\\s*\\{\\s*)?` +
+              `\\(?\\s*${subD.roman}\\s*\\)` +
+              `(?:\\s*\\*\\*|\\s*\\})?` +
+              `[\\s.:\\-–—]*`,
+            'i'
+          );
+          rawQuestionText = rawQuestionText.replace(stripLeadingRomanLabel, '').trimStart();
+        }
+        const cleanedSubQ: ExportQuestion = { ...subQ, question_text: rawQuestionText };
+        const inlinePrefix = romanLabel ? `\\textbf{${romanLabel}} ` : '';
+        lines.push(toQuestionMarker(subQ, sourceQuestionIndex));
+        const handledDottedLines = renderQuestionContent(cleanedSubQ, lines, inlinePrefix, !includeQuestionContent);
+        if (!handledDottedLines) appendDottedAnswerLines(lines, subQ.dotted_answer_line_count);
+        if (gi < groupQuestions.length - 1) {
+          lines.push('\\vspace{0.5em}');
+        }
+      }
+
+      lines.push('\\vspace{0.9em}');
+      bodyParts.push(['\\filbreak', lines.join('\n')].join('\n'));
+      continue;
+    }
 
     // Determine if this starts a roman-numeral group: same base + subPart, with roman
     if (details.isRelatedGroup && details.displayRoman && details.displaySubPart) {
@@ -2264,6 +2366,7 @@ ${fontPackages}
 \\usepackage{xcolor}
 \\usepackage{eso-pic}
 \\usepackage{tikz}
+\\usepackage{needspace}
 \\usepackage[strings]{underscore}
 \\setkeys{Gin}{draft=false}
 \\DeclareMathOperator{\\cosec}{cosec}

@@ -85,10 +85,20 @@ const getImageExtension = (imageUrl: string) => {
   return ext;
 };
 
+const ROMAN_NUMERAL_SEQUENCE_FOR_RAW_LATEX = [
+  'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x',
+  'xi', 'xii', 'xiii', 'xiv', 'xv', 'xvi', 'xvii', 'xviii', 'xix', 'xx',
+];
+
+const sequentialRomanLabelForRawLatex = (index: number) => {
+  const numeral = ROMAN_NUMERAL_SEQUENCE_FOR_RAW_LATEX[index] || `p${index + 1}`;
+  return `(${numeral})`;
+};
+
 const formatRawLatexForQuestion = (question: DisplayExamQuestion) => {
   if (question.grouped_subparts.length > 0) {
     return question.grouped_subparts
-      .map((subpart) => `${subpart.label}\n${subpart.question_text}`)
+      .map((subpart, index) => `${sequentialRomanLabelForRawLatex(index)}\n${subpart.question_text}`)
       .join('\n\n');
   }
 
@@ -102,8 +112,9 @@ const formatSampleAnswerLatexForQuestion = (question: DisplayExamQuestion) => {
 
   if (question.grouped_subparts.length > 0) {
     const groupedAnswers = question.grouped_subparts
-      .filter((subpart) => String(subpart.sample_answer || '').trim())
-      .map((subpart) => `${subpart.label}\n${String(subpart.sample_answer || '').trim()}`)
+      .map((subpart, index) => ({ index, label: sequentialRomanLabelForRawLatex(index), text: String(subpart.sample_answer || '').trim() }))
+      .filter((entry) => entry.text)
+      .map((entry) => `${entry.label}\n${entry.text}`)
       .join('\n\n');
 
     if (groupedAnswers.trim()) return groupedAnswers;
@@ -1174,6 +1185,255 @@ export default function CustomExamView({
                 >
                   <div className="space-y-4 p-4">
 
+                    {/* Quick actions */}
+                    {selectedQuestion ? (
+                      <div className="space-y-2 rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Quick actions</p>
+                        <div className="grid grid-cols-1 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleCopyRawLatex(selectedQuestion)}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                            Copy raw LaTeX
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleCopySampleAnswerLatex(selectedQuestion)}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                            Copy sample answer LaTeX
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleCopyImageList(selectedQuestion)}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
+                          >
+                            <ImageIcon className="h-3.5 w-3.5" />
+                            Copy image URLs
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadImages(selectedQuestion, selectedQuestionIndex + 1)}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download related images
+                          </button>
+                        </div>
+                        {questionActionStatus[selectedQuestion.id] ? (
+                          <p className="pt-1 text-xs font-medium text-neutral-500">{questionActionStatus[selectedQuestion.id]}</p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="flex min-h-[8rem] items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50 px-4 text-center text-sm text-neutral-500">
+                        Select a question to view actions.
+                      </div>
+                    )}
+
+                    {/* Question content & details */}
+                    {selectedQuestion ? (
+                      <div className="space-y-4">
+                        <label className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs font-medium text-neutral-700">
+                          <input
+                            type="checkbox"
+                            checked={includedIdSet.has(selectedQuestion.id)}
+                            onChange={() => toggleIncluded(selectedQuestion.id)}
+                            className="h-4 w-4 cursor-pointer rounded border-neutral-300"
+                          />
+                          Include this question
+                        </label>
+
+                        <div className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Marks</p>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              disabled={Boolean(selectedConfig?.hideMarks)}
+                              value={selectedConfig?.marks ?? 0}
+                              onChange={(event) => {
+                                setSelectedQuestionMarks(Number.parseInt(event.target.value || '0', 10));
+                              }}
+                              className="w-24 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-800 outline-none transition focus:border-neutral-500 disabled:opacity-50"
+                            />
+                            <span className="text-xs text-neutral-500">mark count</span>
+                          </div>
+                          <label className="flex items-center gap-2 text-xs text-neutral-700">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(selectedConfig?.hideMarks)}
+                              onChange={(event) => setSelectedQuestionHideMarks(event.target.checked)}
+                              className="h-4 w-4 cursor-pointer rounded border-neutral-300"
+                            />
+                            Hide marks for this question
+                          </label>
+                          <div className="space-y-1.5 border-t border-neutral-200 pt-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-neutral-700">Dotted lines override</span>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedQuestionDraft({ dotted_answer_line_count: null })}
+                                className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-[10px] font-medium text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-100 cursor-pointer"
+                              >
+                                Use global
+                              </button>
+                            </div>
+                            <input
+                              type="number"
+                              min={1}
+                              max={12}
+                              step={1}
+                              value={selectedDraft?.dotted_answer_line_count ?? ''}
+                              onChange={(event) => {
+                                const raw = String(event.target.value || '').trim();
+                                if (!raw) {
+                                  setSelectedQuestionDraft({ dotted_answer_line_count: null });
+                                  return;
+                                }
+                                const next = Number.parseInt(raw, 10);
+                                if (!Number.isFinite(next)) return;
+                                setSelectedQuestionDraft({ dotted_answer_line_count: Math.max(1, Math.min(12, next)) });
+                              }}
+                              placeholder={`Global (${Math.round(exportPdfOptions.dottedAnswerLineCount || 3)})`}
+                              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-800 outline-none transition focus:border-neutral-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-neutral-200 bg-neutral-50">
+                          <button
+                            type="button"
+                            onClick={() => setIsQuestionContentOpen((prev) => !prev)}
+                            className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+                          >
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Question content</p>
+                            {isQuestionContentOpen ? <ArrowUp className="h-4 w-4 text-neutral-500" /> : <ArrowDown className="h-4 w-4 text-neutral-500" />}
+                          </button>
+
+                          {isQuestionContentOpen ? (
+                            <div className="space-y-3 border-t border-neutral-200 px-3 pb-3 pt-2.5">
+                              <div className="flex items-center justify-end">
+                                <button
+                                  type="button"
+                                  onClick={resetSelectedQuestionDraft}
+                                  className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-[11px] font-medium text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-100 cursor-pointer"
+                                >
+                                  Reset edits
+                                </button>
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <label className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-500" htmlFor="selected-question-text">
+                                  Question content
+                                </label>
+                                <textarea
+                                  id="selected-question-text"
+                                  value={selectedDraft?.question_text ?? selectedQuestion.question_text ?? ''}
+                                  onChange={(event) => setSelectedQuestionDraft({ question_text: event.target.value })}
+                                  className="min-h-[120px] w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-800 outline-none transition focus:border-neutral-500"
+                                />
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <label className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-500" htmlFor="selected-answer-text">
+                                  {selectedQuestion.question_type === 'multiple_choice' ? 'MCQ explanation' : 'Sample answer'}
+                                </label>
+                                <textarea
+                                  id="selected-answer-text"
+                                  value={selectedQuestion.question_type === 'multiple_choice'
+                                    ? (selectedDraft?.mcq_explanation ?? selectedQuestion.mcq_explanation ?? '')
+                                    : (selectedDraft?.sample_answer ?? selectedQuestion.sample_answer ?? '')}
+                                  onChange={(event) => {
+                                    if (selectedQuestion.question_type === 'multiple_choice') {
+                                      setSelectedQuestionDraft({ mcq_explanation: event.target.value });
+                                      return;
+                                    }
+                                    setSelectedQuestionDraft({ sample_answer: event.target.value });
+                                  }}
+                                  className="min-h-[120px] w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-800 outline-none transition focus:border-neutral-500"
+                                />
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {(selectedQuestion.graph_image_data
+                          || selectedQuestion.sample_answer_image
+                          || selectedQuestion.mcq_option_a_image
+                          || selectedQuestion.mcq_option_b_image
+                          || selectedQuestion.mcq_option_c_image
+                          || selectedQuestion.mcq_option_d_image) ? (
+                          <div className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Image sizing</p>
+                            {selectedQuestion.graph_image_data ? (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs text-neutral-700">Question image</span>
+                                <select
+                                  value={selectedQuestion.graph_image_size || 'medium'}
+                                  onChange={(event) => setSelectedQuestionDraft({ graph_image_size: event.target.value as QuestionImageSize })}
+                                  className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs text-neutral-800"
+                                >
+                                  {imageSizeOptions.map((size) => (
+                                    <option key={size} value={size}>{size}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            ) : null}
+
+                            {selectedQuestion.sample_answer_image ? (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs text-neutral-700">Sample answer image</span>
+                                <select
+                                  value={selectedQuestion.sample_answer_image_size || 'medium'}
+                                  onChange={(event) => setSelectedQuestionDraft({ sample_answer_image_size: event.target.value as QuestionImageSize })}
+                                  className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs text-neutral-800"
+                                >
+                                  {imageSizeOptions.map((size) => (
+                                    <option key={size} value={size}>{size}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            ) : null}
+
+                            {([
+                              ['A', selectedQuestion.mcq_option_a_image, selectedQuestion.mcq_option_a_image_size, 'mcq_option_a_image_size'],
+                              ['B', selectedQuestion.mcq_option_b_image, selectedQuestion.mcq_option_b_image_size, 'mcq_option_b_image_size'],
+                              ['C', selectedQuestion.mcq_option_c_image, selectedQuestion.mcq_option_c_image_size, 'mcq_option_c_image_size'],
+                              ['D', selectedQuestion.mcq_option_d_image, selectedQuestion.mcq_option_d_image_size, 'mcq_option_d_image_size'],
+                            ] as Array<[string, string | null | undefined, string | null | undefined, keyof CustomExamQuestionDraftOverride]>).map(([label, imageValue, sizeValue, key]) => {
+                              if (!imageValue) return null;
+                              return (
+                                <div key={label} className="flex items-center justify-between gap-2">
+                                  <span className="text-xs text-neutral-700">MCQ option {label} image</span>
+                                  <select
+                                    value={sizeValue || 'medium'}
+                                    onChange={(event) => setSelectedQuestionDraft({ [key]: event.target.value as QuestionImageSize })}
+                                    className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs text-neutral-800"
+                                  >
+                                    {imageSizeOptions.map((size) => (
+                                      <option key={size} value={size}>{size}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+
+                        <div className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700">
+                          <p><span className="font-semibold text-neutral-900">Topic:</span> {selectedQuestion.topic || 'Not set'}</p>
+                          <p><span className="font-semibold text-neutral-900">Subtopic:</span> {selectedQuestion.subtopic || 'Not set'}</p>
+                          <p><span className="font-semibold text-neutral-900">Year:</span> {selectedQuestion.year || 'Unknown'}</p>
+                          <p><span className="font-semibold text-neutral-900">Source:</span> {selectedQuestion.school_name || DEFAULT_EXAM_SOURCE_LABEL}</p>
+                          <p><span className="font-semibold text-neutral-900">Paper number:</span> {selectedQuestion.source_question_numbers.length ? selectedQuestion.source_question_numbers.join(', ') : (selectedQuestion.display_question_number || 'Unknown')}</p>
+                        </div>
+                      </div>
+                    ) : null}
+
                     {/* PDF customisation */}
                     <div className="rounded-xl border border-neutral-200 bg-neutral-50">
                       <button
@@ -1391,250 +1651,6 @@ export default function CustomExamView({
                         </div>
                       ) : null}
                     </div>
-
-                    {/* Selected question details */}
-                    {selectedQuestion ? (
-                      <div className="space-y-4">
-                        <label className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs font-medium text-neutral-700">
-                          <input
-                            type="checkbox"
-                            checked={includedIdSet.has(selectedQuestion.id)}
-                            onChange={() => toggleIncluded(selectedQuestion.id)}
-                            className="h-4 w-4 cursor-pointer rounded border-neutral-300"
-                          />
-                          Include this question
-                        </label>
-
-                        <div className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
-                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Marks</p>
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="number"
-                              min={0}
-                              step={1}
-                              disabled={Boolean(selectedConfig?.hideMarks)}
-                              value={selectedConfig?.marks ?? 0}
-                              onChange={(event) => {
-                                setSelectedQuestionMarks(Number.parseInt(event.target.value || '0', 10));
-                              }}
-                              className="w-24 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-800 outline-none transition focus:border-neutral-500 disabled:opacity-50"
-                            />
-                            <span className="text-xs text-neutral-500">mark count</span>
-                          </div>
-                          <label className="flex items-center gap-2 text-xs text-neutral-700">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(selectedConfig?.hideMarks)}
-                              onChange={(event) => setSelectedQuestionHideMarks(event.target.checked)}
-                              className="h-4 w-4 cursor-pointer rounded border-neutral-300"
-                            />
-                            Hide marks for this question
-                          </label>
-                          <div className="space-y-1.5 border-t border-neutral-200 pt-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-xs text-neutral-700">Dotted lines override</span>
-                              <button
-                                type="button"
-                                onClick={() => setSelectedQuestionDraft({ dotted_answer_line_count: null })}
-                                className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-[10px] font-medium text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-100 cursor-pointer"
-                              >
-                                Use global
-                              </button>
-                            </div>
-                            <input
-                              type="number"
-                              min={1}
-                              max={12}
-                              step={1}
-                              value={selectedDraft?.dotted_answer_line_count ?? ''}
-                              onChange={(event) => {
-                                const raw = String(event.target.value || '').trim();
-                                if (!raw) {
-                                  setSelectedQuestionDraft({ dotted_answer_line_count: null });
-                                  return;
-                                }
-                                const next = Number.parseInt(raw, 10);
-                                if (!Number.isFinite(next)) return;
-                                setSelectedQuestionDraft({ dotted_answer_line_count: Math.max(1, Math.min(12, next)) });
-                              }}
-                              placeholder={`Global (${Math.round(exportPdfOptions.dottedAnswerLineCount || 3)})`}
-                              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-800 outline-none transition focus:border-neutral-500"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="rounded-xl border border-neutral-200 bg-neutral-50">
-                          <button
-                            type="button"
-                            onClick={() => setIsQuestionContentOpen((prev) => !prev)}
-                            className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
-                          >
-                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Question content</p>
-                            {isQuestionContentOpen ? <ArrowUp className="h-4 w-4 text-neutral-500" /> : <ArrowDown className="h-4 w-4 text-neutral-500" />}
-                          </button>
-
-                          {isQuestionContentOpen ? (
-                            <div className="space-y-3 border-t border-neutral-200 px-3 pb-3 pt-2.5">
-                              <div className="flex items-center justify-end">
-                                <button
-                                  type="button"
-                                  onClick={resetSelectedQuestionDraft}
-                                  className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-[11px] font-medium text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-100 cursor-pointer"
-                                >
-                                  Reset edits
-                                </button>
-                              </div>
-
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-500" htmlFor="selected-question-text">
-                                  Question content
-                                </label>
-                                <textarea
-                                  id="selected-question-text"
-                                  value={selectedDraft?.question_text ?? selectedQuestion.question_text ?? ''}
-                                  onChange={(event) => setSelectedQuestionDraft({ question_text: event.target.value })}
-                                  className="min-h-[120px] w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-800 outline-none transition focus:border-neutral-500"
-                                />
-                              </div>
-
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-semibold uppercase tracking-[0.13em] text-neutral-500" htmlFor="selected-answer-text">
-                                  {selectedQuestion.question_type === 'multiple_choice' ? 'MCQ explanation' : 'Sample answer'}
-                                </label>
-                                <textarea
-                                  id="selected-answer-text"
-                                  value={selectedQuestion.question_type === 'multiple_choice'
-                                    ? (selectedDraft?.mcq_explanation ?? selectedQuestion.mcq_explanation ?? '')
-                                    : (selectedDraft?.sample_answer ?? selectedQuestion.sample_answer ?? '')}
-                                  onChange={(event) => {
-                                    if (selectedQuestion.question_type === 'multiple_choice') {
-                                      setSelectedQuestionDraft({ mcq_explanation: event.target.value });
-                                      return;
-                                    }
-                                    setSelectedQuestionDraft({ sample_answer: event.target.value });
-                                  }}
-                                  className="min-h-[120px] w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-800 outline-none transition focus:border-neutral-500"
-                                />
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-
-                        {(selectedQuestion.graph_image_data
-                          || selectedQuestion.sample_answer_image
-                          || selectedQuestion.mcq_option_a_image
-                          || selectedQuestion.mcq_option_b_image
-                          || selectedQuestion.mcq_option_c_image
-                          || selectedQuestion.mcq_option_d_image) ? (
-                          <div className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">Image sizing</p>
-                            {selectedQuestion.graph_image_data ? (
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs text-neutral-700">Question image</span>
-                                <select
-                                  value={selectedQuestion.graph_image_size || 'medium'}
-                                  onChange={(event) => setSelectedQuestionDraft({ graph_image_size: event.target.value as QuestionImageSize })}
-                                  className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs text-neutral-800"
-                                >
-                                  {imageSizeOptions.map((size) => (
-                                    <option key={size} value={size}>{size}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            ) : null}
-
-                            {selectedQuestion.sample_answer_image ? (
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs text-neutral-700">Sample answer image</span>
-                                <select
-                                  value={selectedQuestion.sample_answer_image_size || 'medium'}
-                                  onChange={(event) => setSelectedQuestionDraft({ sample_answer_image_size: event.target.value as QuestionImageSize })}
-                                  className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs text-neutral-800"
-                                >
-                                  {imageSizeOptions.map((size) => (
-                                    <option key={size} value={size}>{size}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            ) : null}
-
-                            {([
-                              ['A', selectedQuestion.mcq_option_a_image, selectedQuestion.mcq_option_a_image_size, 'mcq_option_a_image_size'],
-                              ['B', selectedQuestion.mcq_option_b_image, selectedQuestion.mcq_option_b_image_size, 'mcq_option_b_image_size'],
-                              ['C', selectedQuestion.mcq_option_c_image, selectedQuestion.mcq_option_c_image_size, 'mcq_option_c_image_size'],
-                              ['D', selectedQuestion.mcq_option_d_image, selectedQuestion.mcq_option_d_image_size, 'mcq_option_d_image_size'],
-                            ] as Array<[string, string | null | undefined, string | null | undefined, keyof CustomExamQuestionDraftOverride]>).map(([label, imageValue, sizeValue, key]) => {
-                              if (!imageValue) return null;
-                              return (
-                                <div key={label} className="flex items-center justify-between gap-2">
-                                  <span className="text-xs text-neutral-700">MCQ option {label} image</span>
-                                  <select
-                                    value={sizeValue || 'medium'}
-                                    onChange={(event) => setSelectedQuestionDraft({ [key]: event.target.value as QuestionImageSize })}
-                                    className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs text-neutral-800"
-                                  >
-                                    {imageSizeOptions.map((size) => (
-                                      <option key={size} value={size}>{size}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-
-                        <div className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700">
-                          <p><span className="font-semibold text-neutral-900">Topic:</span> {selectedQuestion.topic || 'Not set'}</p>
-                          <p><span className="font-semibold text-neutral-900">Subtopic:</span> {selectedQuestion.subtopic || 'Not set'}</p>
-                          <p><span className="font-semibold text-neutral-900">Year:</span> {selectedQuestion.year || 'Unknown'}</p>
-                          <p><span className="font-semibold text-neutral-900">Source:</span> {selectedQuestion.school_name || DEFAULT_EXAM_SOURCE_LABEL}</p>
-                          <p><span className="font-semibold text-neutral-900">Paper number:</span> {selectedQuestion.source_question_numbers.length ? selectedQuestion.source_question_numbers.join(', ') : (selectedQuestion.display_question_number || 'Unknown')}</p>
-                        </div>
-
-                        <div className="space-y-2">
-                          <button
-                            type="button"
-                            onClick={() => void handleCopyRawLatex(selectedQuestion)}
-                            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                            Copy raw LaTeX
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleCopySampleAnswerLatex(selectedQuestion)}
-                            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                            Copy sample answer LaTeX
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleCopyImageList(selectedQuestion)}
-                            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
-                          >
-                            <ImageIcon className="h-3.5 w-3.5" />
-                            Copy image URLs
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadImages(selectedQuestion, selectedQuestionIndex + 1)}
-                            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-neutral-300 bg-white px-3 py-2 text-xs font-semibold text-neutral-700 transition hover:border-neutral-400 hover:bg-neutral-50 cursor-pointer"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            Download related images
-                          </button>
-                        </div>
-
-                        {questionActionStatus[selectedQuestion.id] ? (
-                          <p className="text-xs font-medium text-neutral-500">{questionActionStatus[selectedQuestion.id]}</p>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="flex min-h-[12rem] items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50 px-4 text-center text-sm text-neutral-500">
-                        Select a question to view details.
-                      </div>
-                    )}
 
                   </div>
                 </aside>

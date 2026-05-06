@@ -2,23 +2,24 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  BookmarkCheck,
   BookOpen,
   Brain,
+  Coins,
   GraduationCap,
   History,
-  LineChart,
   Map as MapIcon,
   Plus,
-  PlusCircle,
   RefreshCw,
-  SlidersHorizontal,
   Sparkles,
-  Target,
+  SlidersHorizontal,
   Timer,
   Trophy,
+  Wand2,
   Zap,
 } from 'lucide-react';
 import SyllabusMindmapModal, { type MindmapSelection } from './SyllabusMindmapModal';
+import { DASHBOARD_CHANGELOG } from './changelog';
 import {
   BROWSE_GRADES_JUNIOR,
   BROWSE_GRADES_SENIOR,
@@ -30,138 +31,210 @@ import {
 import type {
   DashboardViewMode,
   ExamBuilderParams,
-  HeatmapCell,
   PaperSummary,
   TopicStat,
 } from './types';
 
 type SetViewMode = (m: DashboardViewMode) => void;
 
-const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 export function DashboardView({
-  setViewMode,
-  heatmapCells,
-  studyStreak,
-  studentName,
-  heatmapMonth,
-  heatmapYear,
-  onHeatmapMonthChange,
+  companyName,
+  questionTokensRemaining,
+  planName,
+  onOpenExamArchitect,
+  onOpenSavedQuestions,
 }: {
-  setViewMode: SetViewMode;
-  heatmapCells: HeatmapCell[];
-  studyStreak: number;
-  studentName: string;
-  heatmapMonth: number;
-  heatmapYear: number;
-  onHeatmapMonthChange: (month: number) => void;
+  companyName: string;
+  questionTokensRemaining: number;
+  planName: string;
+  onOpenExamArchitect: () => void;
+  onOpenSavedQuestions: () => void;
 }) {
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+  const displayName = companyName.trim() || 'there';
+
+  // Pull fresh `question_tokens_balance` and `plan` straight from the Neon-backed
+  // subscription endpoint so this view shows the latest values regardless of when
+  // the parent last refreshed (mirrors the SettingsView fetch pattern).
+  const [tokensOverride, setTokensOverride] = useState<number | null>(null);
+  const [planOverride, setPlanOverride] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let cancelled = false;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    (async () => {
+      try {
+        const response = await fetch('/api/user/subscription', {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (!response.ok) return;
+        const data = (await response.json().catch(() => ({}))) as {
+          plan?: string;
+          questionTokensBalance?: number;
+          error?: string;
+        };
+        if (cancelled || data?.error) return;
+        if (typeof data.questionTokensBalance === 'number') {
+          setTokensOverride(data.questionTokensBalance);
+        }
+        if (typeof data.plan === 'string' && data.plan) {
+          setPlanOverride(`${data.plan.charAt(0).toUpperCase()}${data.plan.slice(1)}`);
+        }
+      } catch {
+        // Silently fall back to props on failure.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const displayedTokens = tokensOverride ?? questionTokensRemaining;
+  const displayedPlan = planOverride ?? planName;
+
+  const todayLabel = new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+
   return (
-    <div className="max-w-6xl mx-auto space-y-10">
-      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-6">
-        <div>
-          <h1 className="text-4xl font-light mb-2">
-            Welcome back, <span className="font-semibold italic">{studentName || 'Student'}</span>
-          </h1>
-          <p className="text-neutral-500 text-lg">Your cognitive endurance is up <span className="text-[#b5a45d] font-bold">14%</span> this week. Keep going.</p>
-        </div>
-        <div className="flex space-x-3">
-          <button type="button" onClick={() => setViewMode('analytics')} className="bg-white border border-neutral-200 px-6 py-3 rounded-full flex items-center space-x-2 hover:bg-neutral-50 transition-all text-sm font-medium text-neutral-800">
-            <LineChart size={18} />
-            <span>Analytics</span>
-          </button>
-          <button type="button" onClick={() => setViewMode('builder')} className="bg-neutral-900 text-white px-6 py-3 rounded-full flex items-center space-x-2 hover:bg-neutral-800 transition-all shadow-lg text-sm font-medium">
-            <PlusCircle size={18} />
-            <span>Build Exam</span>
-          </button>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="glass-card p-6 rounded-2xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-3"><Target size={30} className="text-[#b5a45d] opacity-20" /></div>
-          <p className="text-neutral-400 text-[10px] font-bold uppercase tracking-widest mb-1">Expected Grade</p>
-          <h3 className="text-3xl font-bold text-[#b5a45d]">A+ <span className="text-xs font-normal text-neutral-400">(84%)</span></h3>
-          <div className="mt-3 w-full h-1 bg-neutral-100 rounded-full overflow-hidden">
-            <div className="bg-[#b5a45d] h-full w-[84%]" />
+    <div className="max-w-5xl mx-auto py-10 px-4 space-y-8">
+      <section className="relative overflow-hidden rounded-3xl border border-neutral-200 bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-900 text-white p-10 shadow-xl">
+        <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/5 blur-3xl pointer-events-none" />
+        <div className="absolute -left-16 -bottom-24 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
+        <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.4em] text-neutral-400">
+              <Sparkles className="size-3" /> Dashboard
+            </p>
+            <h1 className="mt-4 text-4xl font-light leading-tight sm:text-5xl">
+              {greeting},{' '}
+              <span className="font-semibold italic bg-gradient-to-r from-white to-neutral-300 bg-clip-text text-transparent">
+                {displayName}
+              </span>
+            </h1>
+            <p className="mt-3 text-sm text-neutral-400">{todayLabel}</p>
           </div>
-        </div>
-        <div className="glass-card p-6 rounded-2xl">
-          <p className="text-neutral-400 text-[10px] font-bold uppercase tracking-widest mb-1">Response Speed</p>
-          <h3 className="text-3xl font-bold italic">2.4m <span className="text-sm font-normal text-neutral-400 tracking-tighter italic">/ avg</span></h3>
-          <p className="text-[10px] text-green-600 mt-2 font-bold flex items-center"><Sparkles size={10} className="mr-1" /> Optimal for Calculus</p>
-        </div>
-        <div className="glass-card p-6 rounded-2xl">
-          <p className="text-neutral-400 text-[10px] font-bold uppercase tracking-widest mb-1">Study Streak</p>
-          <h3 className="text-3xl font-bold">
-            {studyStreak}{' '}
-            <span className="text-sm font-normal text-neutral-400 tracking-tighter italic">
-              {studyStreak === 1 ? 'day' : 'days'}
+          <div className="flex flex-col gap-2 sm:items-end">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-200">
+              <Trophy className="size-3" /> {displayedPlan} plan
             </span>
-          </h3>
-          <p className="text-[10px] text-neutral-400 mt-2 font-medium">
-            {studyStreak > 0 ? 'Keep the streak alive.' : 'Complete a question to start a streak.'}
-          </p>
+            <span className="text-xs text-neutral-400">
+              {displayedTokens.toLocaleString()} tokens remaining
+            </span>
+          </div>
         </div>
-        <div className="glass-card p-6 rounded-2xl bg-neutral-900 text-white border-none shadow-xl">
-          <p className="text-[#b5a45d] text-[10px] font-bold uppercase tracking-widest mb-1">Formula Mastery</p>
-          <h3 className="text-3xl font-bold">18/24</h3>
-          <p className="text-[10px] text-neutral-500 mt-2">Active in vault</p>
+      </section>
+
+      <section className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div className="group relative overflow-hidden rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+          <div className="absolute right-5 top-5 flex size-10 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
+            <Coins className="size-5" />
+          </div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-400">Question Tokens</p>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-4xl font-semibold text-neutral-900">
+              {displayedTokens.toLocaleString()}
+            </span>
+            <span className="text-xs text-neutral-500">remaining</span>
+          </div>
+          <p className="mt-1 text-xs text-neutral-500">Used to generate questions and exams.</p>
         </div>
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex justify-between items-center">
-            <div className="space-y-1">
-              <h2 className="text-lg font-semibold text-neutral-900">Cognitive Heatmap</h2>
-              <p className="text-xs text-neutral-400">{MONTH_LABELS[heatmapMonth]} {heatmapYear}</p>
+
+        <div className="group relative overflow-hidden rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+          <div className="absolute right-5 top-5 flex size-10 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+            <Trophy className="size-5" />
+          </div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-400">Subscription</p>
+          <div className="mt-3 flex items-baseline gap-2">
+            <span className="text-4xl font-semibold capitalize text-neutral-900">{displayedPlan}</span>
+          </div>
+          <p className="mt-1 text-xs text-neutral-500">Your current plan tier.</p>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <button
+          type="button"
+          onClick={onOpenExamArchitect}
+          className="group relative overflow-hidden rounded-3xl bg-neutral-900 p-6 text-left text-white shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl"
+        >
+          <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/5 blur-2xl transition-opacity group-hover:opacity-80" />
+          <div className="relative flex items-start justify-between">
+            <div className="flex size-11 items-center justify-center rounded-2xl bg-white/10">
+              <Wand2 className="size-5" />
             </div>
-            <div className="flex items-center gap-2">
-              <select
-                value={heatmapMonth}
-                onChange={(e) => onHeatmapMonthChange(parseInt(e.target.value, 10))}
-                className="text-xs font-semibold border border-neutral-200 rounded-full px-3 py-1.5 bg-white"
+            <ArrowRight className="size-5 text-neutral-400 transition-transform group-hover:translate-x-1 group-hover:text-white" />
+          </div>
+          <p className="mt-6 text-[10px] font-semibold uppercase tracking-[0.35em] text-neutral-400">Build</p>
+          <h3 className="mt-1 text-xl font-semibold">Exam Architect</h3>
+          <p className="mt-1 text-sm text-neutral-300">Compose practice exams from the question library.</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenSavedQuestions}
+          className="group relative overflow-hidden rounded-3xl border border-neutral-200 bg-white p-6 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+        >
+          <div className="relative flex items-start justify-between">
+            <div className="flex size-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+              <BookmarkCheck className="size-5" />
+            </div>
+            <ArrowRight className="size-5 text-neutral-400 transition-transform group-hover:translate-x-1 group-hover:text-neutral-700" />
+          </div>
+          <p className="mt-6 text-[10px] font-semibold uppercase tracking-[0.35em] text-neutral-400">Library</p>
+          <h3 className="mt-1 text-xl font-semibold text-neutral-900">Saved Questions</h3>
+          <p className="mt-1 text-sm text-neutral-500">Browse and reuse questions you have bookmarked.</p>
+        </button>
+      </section>
+
+      <section className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between border-b border-neutral-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 items-center justify-center rounded-xl bg-neutral-900 text-white">
+              <History className="size-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-neutral-900">Changelog</h2>
+              <p className="text-[11px] text-neutral-500">Recent product updates</p>
+            </div>
+          </div>
+          <span className="hidden text-[10px] uppercase tracking-[0.3em] text-neutral-400 sm:inline">Latest</span>
+        </div>
+        <ol className="mt-5 space-y-4 text-sm">
+          {DASHBOARD_CHANGELOG.length === 0 ? (
+            <li className="rounded-2xl border border-dashed border-neutral-200 px-4 py-6 text-center text-neutral-500">
+              No entries yet.
+            </li>
+          ) : (
+            DASHBOARD_CHANGELOG.map((entry) => (
+              <li
+                key={`${entry.date}-${entry.title}`}
+                className="relative rounded-2xl border border-neutral-100 bg-neutral-50/60 px-4 py-3 pl-5 transition-colors hover:border-neutral-200 hover:bg-white"
               >
-                {MONTH_LABELS.map((label, idx) => (
-                  <option key={label} value={idx}>{label}</option>
-                ))}
-              </select>
-              <button type="button" onClick={() => setViewMode('analytics')} className="text-xs text-[#b5a45d] font-bold tracking-widest">EXPLORE HUB</button>
-            </div>
-          </div>
-          <div className="p-8 bg-neutral-50 border border-neutral-100 rounded-3xl grid grid-cols-7 gap-3">
-            {heatmapCells.map((day) => {
-              const intensity =
-                day.count >= 6 ? 'bg-[#b5a45d]' :
-                  day.count >= 3 ? 'bg-[#b5a45d]/70' :
-                    day.count > 0 ? 'bg-[#b5a45d]/40' :
-                      day.inMonth ? 'bg-white border border-neutral-100' : 'bg-transparent border-transparent';
-              const title = day.inMonth
-                ? (day.count > 0
-                  ? `${day.label}: ${day.count} question${day.count === 1 ? '' : 's'}`
-                  : `${day.label}: no questions`)
-                : '';
-              return (
-                <div
-                  key={day.dateKey}
-                  className={`aspect-square rounded border border-neutral-100 transition-all cursor-help ${intensity}`}
-                  title={title}
-                />
-              );
-            })}
-          </div>
-        </div>
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-neutral-900">Pressure Simulation</h2>
-          <div className="glass-card rounded-2xl p-6 bg-amber-50/20 border-amber-200/40">
-            <div className="flex items-center space-x-3 mb-4">
-              <Timer className="text-amber-600" size={20} />
-              <h3 className="font-bold text-amber-900">Next Simulation</h3>
-            </div>
-            <p className="text-xs text-amber-800/60 mb-6 leading-relaxed">Your scheduled mock exam for <span className="font-bold text-amber-900">Physics P2</span> starts in 14 hours. Review your formulas first.</p>
-            <button type="button" onClick={() => setViewMode('builder')} className="w-full py-3 bg-amber-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-amber-700 transition-all shadow-lg shadow-amber-600/20">Enter Simulator</button>
-          </div>
-        </div>
-      </div>
+                <span className="absolute left-0 top-3 h-[calc(100%-1.5rem)] w-1 rounded-full bg-gradient-to-b from-neutral-900 to-neutral-400" />
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-neutral-900">{entry.title}</p>
+                  <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-500 ring-1 ring-neutral-200">
+                    {entry.date}
+                  </span>
+                </div>
+                {entry.detail ? (
+                  <p className="mt-1 text-xs text-neutral-600">{entry.detail}</p>
+                ) : null}
+              </li>
+            ))
+          )}
+        </ol>
+      </section>
     </div>
   );
 }
