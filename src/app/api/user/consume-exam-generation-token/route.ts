@@ -17,8 +17,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
 
-    const body = (await request.json().catch(() => ({}))) as { grade?: string };
+    const body = (await request.json().catch(() => ({}))) as { grade?: string; questionCount?: number };
     const requestedGrade = String(body.grade || '').trim();
+    const questionCount = Number.isInteger(body.questionCount) && (body.questionCount as number) > 0
+      ? (body.questionCount as number)
+      : 1;
 
     let user = await getUserById(decoded.userId);
     if (!user) {
@@ -31,7 +34,7 @@ export async function POST(request: NextRequest) {
     const limit = PLAN_EXPORT_LIMITS[plan];
     const used = user.exports_used_this_month ?? 0;
 
-    if (used >= limit) {
+    if (plan !== 'free' && used >= limit) {
       const message = limit === 0
         ? 'Exam generation tokens are not included in the free plan. Upgrade to Standard or Pro to generate exams.'
         : `Monthly exam generation token limit reached (${used}/${limit}). Upgrade your plan or wait until next month.`;
@@ -79,22 +82,34 @@ export async function POST(request: NextRequest) {
 
     if (plan === 'free') {
       const balance = user.question_tokens_balance ?? 0;
-      if (balance > 0) {
-        const consumeResult = await consumeQuestionTokens(user.id, 1);
-        if (!consumeResult.ok) {
-          return NextResponse.json(
-            {
-              error: 'Unable to consume question tokens for free plan exam creation.',
-              code: 'QUESTION_TOKEN_CONSUME_FAILED',
-              questionTokensRemaining: consumeResult.remaining,
-            },
-            { status: 500 }
-          );
-        }
-
-        usedQuestionTokenForFreePlan = true;
-        questionTokensRemaining = consumeResult.remaining;
+      if (balance < questionCount) {
+        return NextResponse.json(
+          {
+            error: `Not enough question tokens. This exam needs ${questionCount} token${questionCount === 1 ? '' : 's'} but you have ${balance}.`,
+            code: 'INSUFFICIENT_QUESTION_TOKENS',
+            tokensNeeded: questionCount,
+            tokensAvailable: balance,
+            tokensShortby: questionCount - balance,
+            questionTokensRemaining: balance,
+          },
+          { status: 429 }
+        );
       }
+
+      const consumeResult = await consumeQuestionTokens(user.id, questionCount);
+      if (!consumeResult.ok) {
+        return NextResponse.json(
+          {
+            error: 'Unable to consume question tokens for free plan exam creation.',
+            code: 'QUESTION_TOKEN_CONSUME_FAILED',
+            questionTokensRemaining: consumeResult.remaining,
+          },
+          { status: 500 }
+        );
+      }
+
+      usedQuestionTokenForFreePlan = true;
+      questionTokensRemaining = consumeResult.remaining;
     }
 
     await incrementExportCount(user.id);
