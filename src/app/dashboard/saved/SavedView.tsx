@@ -658,6 +658,9 @@ export default function SavedView({
                           {savedAttempts.map((attempt) => {
                             const isExam = attempt.type === 'exam';
                             const savedDate = attempt.savedAt ? new Date(attempt.savedAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+                            const selectedTopics = Array.isArray(attempt.selectedTopics)
+                              ? attempt.selectedTopics.map((topic: string) => String(topic || '').trim()).filter(Boolean)
+                              : null;
                             const examTopics = isExam
                               ? Array.from(
                                   new Set(
@@ -667,7 +670,9 @@ export default function SavedView({
                                   )
                                 )
                               : [];
-                            const topicsLabel = examTopics.length ? examTopics.join(', ') : 'Not specified';
+                            const topicsLabel = selectedTopics
+                              ? (selectedTopics.length ? selectedTopics.join(', ') : 'All topics')
+                              : (examTopics.length ? examTopics.join(', ') : 'Not specified');
                             const subjectGradeLabel = [attempt.paperSubject, attempt.paperGrade].filter(Boolean).join(' • ') || 'Not specified';
                             const questionCount = attempt.examAttempts?.length ?? 0;
                             return (

@@ -119,7 +119,7 @@ const Excalidraw = dynamic(
 
 const CUSTOM_EXAM_STORAGE_KEY = 'currentCustomExam';
 const CUSTOM_EXAM_SESSION_STORAGE_KEY = 'currentCustomExam:session';
-const CUSTOM_EXAM_MAX_QUESTIONS = 25;
+const CUSTOM_EXAM_MAX_QUESTIONS = 50;
 
 const isQuotaExceededError = (error: unknown) => {
   if (error instanceof DOMException) {
@@ -704,17 +704,18 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     return 'Grouped';
   };
 
+  const normalizeGroupLabel = (value: string | undefined) => String(value || '').trim().toLowerCase();
+
   const expandManualGroupedSelection = (
     selected: Question[],
     sourcePool: Question[],
     groupByQuestionId: Record<string, string>
   ) => {
-    const normalizeGroup = (value: string | undefined) => String(value || '').trim().toLowerCase();
     const groups = new Map<string, Question[]>();
 
     sourcePool.forEach((question) => {
       const rawLabel = groupByQuestionId[question.id];
-      const label = normalizeGroup(rawLabel);
+      const label = normalizeGroupLabel(rawLabel);
       if (!label) return;
       const existing = groups.get(label) || [];
       existing.push(question);
@@ -735,7 +736,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     const expanded: Question[] = [];
 
     selected.forEach((question) => {
-      const groupLabel = normalizeGroup(groupByQuestionId[question.id]);
+      const groupLabel = normalizeGroupLabel(groupByQuestionId[question.id]);
       if (groupLabel) {
         if (seenGroupLabels.has(groupLabel)) return;
         seenGroupLabels.add(groupLabel);
@@ -760,38 +761,47 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     return expanded;
   };
 
+  const sortQuestionsByNumber = (left: Question, right: Question) => {
+    const leftParts = parseQuestionNumberForSort(left.question_number);
+    const rightParts = parseQuestionNumberForSort(right.question_number);
+    return leftParts.number - rightParts.number
+      || leftParts.part.localeCompare(rightParts.part)
+      || leftParts.subpart - rightParts.subpart
+      || leftParts.raw.localeCompare(rightParts.raw);
+  };
+
+  const getAdvancedLetterGroupKey = (question: Question) => {
+    if (!isMathematicsLetterGroupingSubject(question.subject)) return null;
+    const parsed = parseQuestionNumberForSort(question.question_number);
+    if (!parsed.part || !Number.isFinite(parsed.number)) return null;
+    const paperNumber = String((question as any).paper_number ?? '');
+    return [
+      String(question.grade || ''),
+      String(question.subject || ''),
+      String(question.year || ''),
+      String(question.school_name || ''),
+      paperNumber,
+      String(parsed.number),
+    ].join('|');
+  };
+
+  const getRomanGroupKey = (question: Question) => {
+    if (!isMathematicsExtensionSubject(question.subject)) return null;
+    const parsed = parseQuestionNumberForSort(question.question_number);
+    if (!parsed.part || !parsed.subpart) return null;
+    const base = getQuestionDisplayBase(question.question_number);
+    const paperNumber = String((question as any).paper_number ?? '');
+    return [
+      String(question.grade || ''),
+      String(question.subject || ''),
+      String(question.year || ''),
+      String(question.school_name || ''),
+      paperNumber,
+      base,
+    ].join('|');
+  };
+
   const expandRomanSubpartSelection = (selected: Question[], sourcePool: Question[]) => {
-    const getAdvancedLetterGroupKey = (question: Question) => {
-      if (!isMathematicsLetterGroupingSubject(question.subject)) return null;
-      const parsed = parseQuestionNumberForSort(question.question_number);
-      if (!parsed.part || !Number.isFinite(parsed.number)) return null;
-      const paperNumber = String((question as any).paper_number ?? '');
-      return [
-        String(question.grade || ''),
-        String(question.subject || ''),
-        String(question.year || ''),
-        String(question.school_name || ''),
-        paperNumber,
-        String(parsed.number),
-      ].join('|');
-    };
-
-    const getRomanGroupKey = (question: Question) => {
-      if (!isMathematicsExtensionSubject(question.subject)) return null;
-      const parsed = parseQuestionNumberForSort(question.question_number);
-      if (!parsed.part || !parsed.subpart) return null;
-      const base = getQuestionDisplayBase(question.question_number);
-      const paperNumber = String((question as any).paper_number ?? '');
-      return [
-        String(question.grade || ''),
-        String(question.subject || ''),
-        String(question.year || ''),
-        String(question.school_name || ''),
-        paperNumber,
-        base,
-      ].join('|');
-    };
-
     const advancedGroups = new Map<string, Question[]>();
     sourcePool.forEach((question) => {
       const groupKey = getAdvancedLetterGroupKey(question);
@@ -802,11 +812,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     });
 
     advancedGroups.forEach((group, groupKey) => {
-      const sortedGroup = [...group].sort((a, b) => {
-        const left = parseQuestionNumberForSort(a.question_number);
-        const right = parseQuestionNumberForSort(b.question_number);
-        return left.number - right.number || left.part.localeCompare(right.part) || left.subpart - right.subpart || left.raw.localeCompare(right.raw);
-      });
+      const sortedGroup = [...group].sort(sortQuestionsByNumber);
       advancedGroups.set(groupKey, sortedGroup);
     });
 
@@ -820,11 +826,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
     });
 
     romanGroups.forEach((group, groupKey) => {
-      const sortedGroup = [...group].sort((a, b) => {
-        const left = parseQuestionNumberForSort(a.question_number);
-        const right = parseQuestionNumberForSort(b.question_number);
-        return left.number - right.number || left.part.localeCompare(right.part) || left.subpart - right.subpart || left.raw.localeCompare(right.raw);
-      });
+      const sortedGroup = [...group].sort(sortQuestionsByNumber);
       romanGroups.set(groupKey, sortedGroup);
     });
 
@@ -4783,7 +4785,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         return true;
       });
 
-      const filtered = gradeSubjectPool.filter((q) => {
+      const matchesBuilderFilters = (q: Question) => {
         const topic = String(q.topic || '').trim();
         if (topic.toLowerCase() === 'unspecified') return false;
         if (params.topics.length > 0 && !params.topics.includes(topic)) return false;
@@ -4803,7 +4805,9 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         }
 
         return true;
-      });
+      };
+
+      const filtered = gradeSubjectPool.filter(matchesBuilderFilters);
 
       if (!filtered.length) {
         return { ok: false, message: 'No questions match these settings yet.' };
@@ -4816,7 +4820,74 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         shuffled.length,
         CUSTOM_EXAM_MAX_QUESTIONS
       );
-      const selected = shuffled.slice(0, targetCount);
+
+      const manualGroups = new Map<string, Question[]>();
+      gradeSubjectPool.forEach((question) => {
+        const rawLabel = customExamGroupByQuestionId[question.id];
+        const label = normalizeGroupLabel(rawLabel);
+        if (!label) return;
+        const existing = manualGroups.get(label) || [];
+        existing.push(question);
+        manualGroups.set(label, existing);
+      });
+      manualGroups.forEach((items, label) => {
+        manualGroups.set(label, [...items].sort(sortQuestionsByNumber));
+      });
+
+      const advancedGroups = new Map<string, Question[]>();
+      const romanGroups = new Map<string, Question[]>();
+      gradeSubjectPool.forEach((question) => {
+        const advancedKey = getAdvancedLetterGroupKey(question);
+        if (advancedKey) {
+          const existing = advancedGroups.get(advancedKey) || [];
+          existing.push(question);
+          advancedGroups.set(advancedKey, existing);
+        }
+        const romanKey = getRomanGroupKey(question);
+        if (romanKey) {
+          const existing = romanGroups.get(romanKey) || [];
+          existing.push(question);
+          romanGroups.set(romanKey, existing);
+        }
+      });
+      advancedGroups.forEach((items, key) => {
+        advancedGroups.set(key, [...items].sort(sortQuestionsByNumber));
+      });
+      romanGroups.forEach((items, key) => {
+        romanGroups.set(key, [...items].sort(sortQuestionsByNumber));
+      });
+
+      const resolveSelectionGroup = (question: Question) => {
+        const manualLabel = normalizeGroupLabel(customExamGroupByQuestionId[question.id]);
+        if (manualLabel) return manualGroups.get(manualLabel) || [question];
+
+        const advancedKey = getAdvancedLetterGroupKey(question);
+        if (advancedKey) return advancedGroups.get(advancedKey) || [question];
+
+        const romanKey = getRomanGroupKey(question);
+        if (romanKey) return romanGroups.get(romanKey) || [question];
+
+        return [question];
+      };
+
+      const selected: Question[] = [];
+      const selectedIds = new Set<string>();
+      let selectedCount = 0;
+
+      for (const question of shuffled) {
+        if (selectedCount >= targetCount) break;
+        if (selectedIds.has(question.id)) continue;
+        const group = resolveSelectionGroup(question);
+        const freshGroup = group.filter((item) => !selectedIds.has(item.id));
+        if (freshGroup.length === 0) continue;
+        if (selectedCount + freshGroup.length > targetCount) continue;
+        freshGroup.forEach((item) => {
+          selectedIds.add(item.id);
+          selected.push(item);
+        });
+        selectedCount += freshGroup.length;
+      }
+
       const manualGroupedSelection = expandManualGroupedSelection(selected, gradeSubjectPool, customExamGroupByQuestionId);
       const romanGroupedSelection = expandRomanSubpartSelection(manualGroupedSelection, gradeSubjectPool);
       const finalSelectionWithSharedImages = applySiblingGraphImages(romanGroupedSelection);
@@ -4835,6 +4906,7 @@ export default function DashboardApp({ initialViewMode = 'dashboard' }: { initia
         paperYear: 'Custom',
         paperSubject: params.subject,
         paperGrade: params.grade,
+        selectedTopics: params.topics,
         examAttempts: orderedSelection.map((q) => ({ question: q, submittedAnswer: null, feedback: null })),
         totalScore: 0,
         totalPossible,

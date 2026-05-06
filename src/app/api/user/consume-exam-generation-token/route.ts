@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     let usedQuestionTokenForYearOverride = false;
+    let usedQuestionTokenForFreePlan = false;
     let questionTokensRemaining: number | null = null;
 
     if (plan === 'standard' && (requestedGrade === 'Year 11' || requestedGrade === 'Year 12')) {
@@ -76,6 +77,26 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (plan === 'free') {
+      const balance = user.question_tokens_balance ?? 0;
+      if (balance > 0) {
+        const consumeResult = await consumeQuestionTokens(user.id, 1);
+        if (!consumeResult.ok) {
+          return NextResponse.json(
+            {
+              error: 'Unable to consume question tokens for free plan exam creation.',
+              code: 'QUESTION_TOKEN_CONSUME_FAILED',
+              questionTokensRemaining: consumeResult.remaining,
+            },
+            { status: 500 }
+          );
+        }
+
+        usedQuestionTokenForFreePlan = true;
+        questionTokensRemaining = consumeResult.remaining;
+      }
+    }
+
     await incrementExportCount(user.id);
 
     const tokensUsed = used + 1;
@@ -87,6 +108,7 @@ export async function POST(request: NextRequest) {
       tokensResetAt: user.exports_reset_at ?? null,
       hasActiveSubscription: plan !== 'free',
       usedQuestionTokenForYearOverride,
+      usedQuestionTokenForFreePlan,
       questionTokensRemaining,
     });
   } catch (error) {

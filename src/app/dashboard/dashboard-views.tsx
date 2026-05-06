@@ -723,13 +723,13 @@ export function ExamBuilderView({
             <input
               type="range"
               min={10}
-              max={25}
+              max={50}
               step={5}
               value={intensity}
               onChange={(e) => setIntensity(Number(e.target.value))}
               className="w-full accent-[#b5a45d] h-1.5 bg-neutral-100 rounded-lg appearance-none cursor-pointer"
             />
-            <p className="text-[11px] text-neutral-400">Set how many questions to include (maximum 25).</p>
+            <p className="text-[11px] text-neutral-400">Set how many questions to include (maximum 50).</p>
 
             <div className="pt-3 space-y-3">
               <label className="text-[10px] font-bold tracking-[0.2em] uppercase text-neutral-400">Question types</label>
