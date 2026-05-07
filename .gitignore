@@ -42,3 +42,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+C:\Users\peter\.ssh\id_ed25519
+C:\Users\peter\.ssh\id_ed25519.pub
